@@ -1,0 +1,690 @@
+<script>
+let rhCharts = {};
+let RH_STATE = {
+  masseCache: null,
+  congesCache: null,
+  moisSelectedMasse: "",
+  activeTab: "masse",
+  entite: "ALL", sousEntite: "", trimestre: "", annee: "", mois: "" 
+};
+
+function setTxt_(id, v) { const el = document.getElementById(id); if (el) el.textContent = (v === null || v === undefined || v === "") ? "--" : String(v); }
+function fmtNum_(x) { const n = Number(x); if (isNaN(n)) return "--"; return n.toLocaleString("fr-FR"); }
+function fmtPct_(x) { const n = Number(x); if (isNaN(n)) return "--"; return (n * 100).toFixed(1).replace(".", ",") + "%"; }
+function fillSel_(id, arr) {
+  const el = document.getElementById(id); if (!el) return;
+  el.innerHTML = "";
+  (arr || []).forEach(item => {
+    const isObj = item && typeof item === "object";
+    const value = isObj ? String(item.value ?? "") : String(item ?? "");
+    const label = isObj ? String(item.label ?? value) : ((value === "ALL") ? "TOUT" : value);
+    const opt = document.createElement("option"); opt.value = value; opt.textContent = label; el.appendChild(opt);
+  });
+}
+
+function showHoverTip_(html, x, y){
+  const tip = document.getElementById("rhHoverTip"); if(!tip) return;
+  tip.innerHTML = html; tip.style.display = "block";
+  const pad = 14; const ww = window.innerWidth, wh = window.innerHeight;
+  let left = x + pad; let top = y + pad;
+  const rect = tip.getBoundingClientRect();
+  if (left + rect.width > ww - 10) left = x - rect.width - pad;
+  if (top + rect.height > wh - 10) top = y - rect.height - pad;
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+}
+
+function hideHoverTip_(){ const tip = document.getElementById("rhHoverTip"); if(!tip) return; tip.style.display = "none"; }
+
+function monthLabelShort_(ym) {
+  const s = String(ym || ""); let m = 0;
+  if (s.includes("-")) { m = Number(s.split("-")[1] || 0); } else if (s.includes("/")) { m = Number(s.split("/")[1] || 0); }
+  const map = ["", "Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"];
+  return map[m] || s;
+}
+
+function enterRhMode_() { loadRhData_(true); }
+
+function loadRhData_(init) {
+  const entEl   = document.getElementById("rhEntite"); const subWrap = document.getElementById("rhSubEntiteWrap");
+  const subEl   = document.getElementById("rhSousEntite"); const triEl   = document.getElementById("rhTrimestre");
+  const anneeEl = document.getElementById("rhAnnee"); const moisEl  = document.getElementById("rhMois");
+  const btn     = document.getElementById("rhApplyBtn");
+  const setBtn = (t)=>{ if(btn) btn.innerText = t; };
+  
+  const monthNameFR_ = (mm) => {
+    const map = { "01":"JAN","02":"FEV","03":"MAR","04":"AVR","05":"MAI","06":"JUN","07":"JUI","08":"AOU","09":"SEP","10":"OCT","11":"NOV","12":"DEC" };
+    return map[String(mm||"").padStart(2,"0")] || String(mm||"");
+  };
+
+  const quarterOf_ = (ym) => {
+    const s = String(ym||""); const m = Number(s.split("-")[1] || 0);
+    if(!m) return 0; if(m<=3) return 1; if(m<=6) return 2; if(m<=9) return 3; return 4;
+  };
+
+  const formatMoisLabel_ = (ym, withYear) => {
+    const s = String(ym||""); const parts = s.split("-"); const y = parts[0] || ""; const m = parts[1] || "";
+    return withYear ? `${monthNameFR_(m)} ${y}` : monthNameFR_(m);
+  };
+
+  const buildMonthsOptions_ = (allMonths, trimestre, year) => {
+    let months = (allMonths || []).slice().filter(Boolean);
+    if(year){ const y = String(year).trim(); if(y) months = months.filter(ym => String(ym).startsWith(y + "-")); }
+    if(trimestre){ const q = Number(String(trimestre).replace("T","")) || 0; if(q){ months = months.filter(ym => quarterOf_(ym) === q); } }
+    months.sort();
+    const years = new Set(months.map(m=>String(m).split("-")[0]).filter(Boolean));
+    const withYear = (!year) && (years.size > 1);
+    return months.map(ym => ({ value: ym, label: formatMoisLabel_(ym, withYear) }));
+  };
+
+  const buildYearsOptions_ = (allMonths) => {
+    const months = (allMonths || []).slice().filter(Boolean);
+    const years = Array.from(new Set(months.map(m => String(m).split("-")[0]).filter(Boolean))).sort();
+    return years.map(y => ({ value: y, label: y }));
+  };
+
+  const applyEntiteCascade_ = () => {
+    const v = entEl ? (entEl.value || "ALL") : "ALL";
+    if(v === "HIA CIOA"){
+      if(subWrap) subWrap.style.display = "";
+      if(subEl){
+        const opts = [ { value:"ALL", label:"GLOBAL (HIA+CIOA)" }, { value:"HIA", label:"HIA" }, { value:"CIOA", label:"CIOA" } ];
+        if(subEl.options.length !== opts.length) fillSel_("rhSousEntite", opts, true);
+        subEl.disabled = false;
+      }
+    } else {
+      if(subWrap) subWrap.style.display = "none";
+      if(subEl){ subEl.value = "ALL"; subEl.disabled = true; }
+    }
+  };
+
+  const computeEntWanted_ = () => {
+    if (window.currentUserContext && window.currentUserContext.role === 'VIEWER_ENTITY' && window.currentUserContext.entity) {
+        const ent = window.currentUserContext.entity;
+        if (ent === "HIA CIOA") {
+            const s = (subEl && !subEl.disabled) ? (subEl.value || "ALL") : "ALL";
+            if(s && s !== "ALL") return s;
+            return "HIA/CIOA";
+        }
+        return ent;
+    }
+    const v = entEl ? (entEl.value || "ALL") : "ALL";
+    if(v === "HIA CIOA"){
+      const s = (subEl && !subEl.disabled) ? (subEl.value || "ALL") : "ALL";
+      if(s && s !== "ALL") return s;
+      return "HIA/CIOA";
+    }
+    return v || "ALL";
+  };
+
+  const computeSelectedMois_ = (allMonths) => {
+    const tri = triEl ? (triEl.value || "") : "";
+    const current = moisEl ? (moisEl.value || "") : "";
+    const year = anneeEl ? (anneeEl.value || "") : "";
+    const opts = buildMonthsOptions_(allMonths, tri, year);
+    if(moisEl){
+      fillSel_("rhMois", opts, true);
+      const stillThere = opts.some(o => o.value === current);
+      if(stillThere) moisEl.value = current;
+      else moisEl.value = (opts.length ? opts[opts.length - 1].value : "");
+    }
+    return moisEl ? (moisEl.value || "") : "";
+  };
+
+  const runLoad_ = (initCall, baseFilters) => {
+    const entWanted = computeEntWanted_();
+    const mois = computeSelectedMois_(baseFilters.mois || []);
+    RH_STATE.entite = entWanted || "ALL"; RH_STATE.annee = anneeEl ? (anneeEl.value || "") : "";
+    RH_STATE.mois = mois || ""; RH_STATE.trimestre = triEl ? (triEl.value || "") : "";
+    setBtn("...");
+    google.script.run
+      .withSuccessHandler(res => {
+        setBtn("appliquer");
+        renderRH_(res.kpis, res.charts, res.kpisExtra, res.conges);
+        RH_STATE.masseCache = res;
+        loadRHMasse_(RH_STATE.entite, RH_STATE.mois, RH_STATE.annee);
+        if (RH_STATE.activeTab === "conges") loadRHConges_(RH_STATE.entite, RH_STATE.mois);
+      })
+      .withFailureHandler(err => { setBtn("appliquer"); console.error("apiRH error:", err); })
+      .apiRH({ entite: RH_STATE.entite, annee: RH_STATE.annee, mois: RH_STATE.mois });
+  };
+
+  if(init){
+    setBtn("...");
+    let initEntite = "ALL";
+    if (window.currentUserContext && window.currentUserContext.role === 'VIEWER_ENTITY') { initEntite = window.currentUserContext.entity; }
+    google.script.run
+      .withSuccessHandler(res => {
+        setBtn("appliquer");
+        const gEnt = document.getElementById('entite') ? document.getElementById('entite').value : "";
+        const gAn = document.getElementById('annee') ? document.getElementById('annee').value : "";
+        const gTrim = document.getElementById('trimestre') ? document.getElementById('trimestre').value : "";
+        const entites = (res.filters && res.filters.entites) ? res.filters.entites.slice() : ["ALL"];
+        const base = entites.filter(x => String(x).toUpperCase().trim() !== "ALL").sort();
+        const options = [{ value:"ALL", label:"TOUT" }];
+        if(base.includes("HIA") || base.includes("CIOA")) options.push({ value:"HIA CIOA", label:"HIA CIOA" });
+        const preferred = ["ALL","HIA CIOA","CIT","CID","HPG","PIL","ALHIKMA"];
+        const seen = new Set(options.map(o=>o.value));
+        preferred.forEach(v=>{
+          if(seen.has(v)) return;
+          if(v==="ALL") { options.unshift({ value:"ALL", label:"TOUT" }); seen.add("ALL"); return; }
+          if(v==="HIA CIOA" && (base.includes("HIA") || base.includes("CIOA"))){ options.push({ value:"HIA CIOA", label:"HIA CIOA" }); seen.add("HIA CIOA"); return; }
+          if(base.includes(v)){ options.push({ value:v, label:v }); seen.add(v); }
+        });
+        base.forEach(e => { if(e!=="HIA" && e!=="CIOA" && !seen.has(e)) { options.push({ value:e, label:e }); seen.add(e); } });
+        if(entEl) { fillSel_("rhEntite", options, true); if (window.currentUserContext && window.currentUserContext.role === 'VIEWER_ENTITY') { entEl.value = window.currentUserContext.entity; entEl.disabled = true; } else if (gEnt && Array.from(entEl.options).some(o => o.value === gEnt)) { entEl.value = gEnt; } }
+        if(triEl){ triEl.value = gTrim || ""; triEl.onchange = () => { computeSelectedMois_((res.filters && res.filters.mois) ? res.filters.mois : []); RH_STATE.trimestre = triEl.value || ""; RH_STATE.mois = moisEl ? (moisEl.value || "") : ""; refresh_(); }; }
+        applyEntiteCascade_();
+        if(entEl) entEl.onchange = () => { applyEntiteCascade_(); computeSelectedMois_((res.filters && res.filters.mois) ? res.filters.mois : []); refresh_(); };
+        const allMonths = (res.filters && res.filters.mois) ? res.filters.mois : [];
+        const yearOpts = buildYearsOptions_(allMonths);
+        const defYear = (res.filters && res.filters.defaultAnnee) ? res.filters.defaultAnnee : (yearOpts.length ? yearOpts[yearOpts.length - 1].value : "");
+        if(anneeEl){ fillSel_("rhAnnee", yearOpts, true); anneeEl.value = gAn || defYear || ""; }
+        RH_STATE.annee = (anneeEl && anneeEl.value) ? anneeEl.value : "";
+        if(moisEl){
+          const yearSel = RH_STATE.annee || defYear || "";
+          const monthOpts = buildMonthsOptions_(allMonths, gTrim, yearSel);
+          let defM = "";
+          const gMoisShort = document.getElementById('mois') ? document.getElementById('mois').value : "";
+          if (gMoisShort && yearSel) {
+             const mapShort = { "JAN":"01","FEV":"02","MAR":"03","AVR":"04","MAI":"05","JUIN":"06","JUIL":"07","AOU":"08","SEP":"09","OCT":"10","NOV":"11","DEC":"12" };
+             const num = mapShort[gMoisShort];
+             if (num) { const constructed = `${yearSel}-${num}`; if (monthOpts.some(o => o.value === constructed)) defM = constructed; }
+          }
+          if(!defM) { const backendDef = (res.filters && res.filters.defaultMois) ? String(res.filters.defaultMois) : ""; if(backendDef && yearSel && backendDef.startsWith(String(yearSel) + "-")) defM = backendDef; }
+          if(!defM) defM = (monthOpts.length ? monthOpts[monthOpts.length - 1].value : "");
+          fillSel_("rhMois", monthOpts, true); moisEl.value = defM || "";
+        }
+        RH_STATE.mois = (moisEl && moisEl.value) ? moisEl.value : "";
+        let _rhT = null;
+        const refreshNow_ = () => runLoad_(false, (res.filters||{}));
+        const refresh_ = () => { if(_rhT) clearTimeout(_rhT); _rhT = setTimeout(refreshNow_, 120); };
+        const hookChange_ = (el) => {
+          if(!el) return;
+          el.onchange = () => {
+            RH_STATE.entite = entEl ? (entEl.value || "ALL") : "ALL";
+            RH_STATE.sousEntite = (subEl && !subEl.disabled) ? (subEl.value || "ALL") : "";
+            RH_STATE.annee = anneeEl ? (anneeEl.value || "") : "";
+            RH_STATE.trimestre = triEl ? (triEl.value || "") : "";
+            RH_STATE.mois = moisEl ? (moisEl.value || "") : "";
+            if(el === entEl) applyEntiteCascade_();
+            if(el === anneeEl){ computeSelectedMois_((res.filters && res.filters.mois) ? res.filters.mois : []); RH_STATE.mois = moisEl ? (moisEl.value || "") : ""; }
+            refresh_();
+          };
+        };
+        hookChange_(entEl); hookChange_(subEl); hookChange_(anneeEl); hookChange_(moisEl);
+        runLoad_(true, (res.filters||{}));
+        const c = document.getElementById("rhModalClose"); if (c) c.onclick = closeRhModal_;
+        const msk = document.getElementById("rhModalMask"); if (msk) msk.onclick = closeRhModal_;
+      })
+      .withFailureHandler(err => { setBtn("appliquer"); console.error("apiRH init error:", err); })
+      .apiRH({ entite: initEntite, annee:"", mois:"" });
+    return;
+  }
+  if(btn) btn.onclick = () => { runLoad_(false, {}); };
+}
+
+function renderRH_(k, c, kpisExtra, conges) {
+  if (!k || k.available === false) {
+    setTxt_("kpi-nbpers", "--"); setTxt_("kpi-nbpers-sub", "--");
+    setTxt_("kpi-recrut", "--"); setTxt_("kpi-depart", "--");
+    setTxt_("kpi-tauxabs", "--"); setTxt_("kpi-turnover2", "--");
+    setTxt_("kpi-at", "--"); setTxt_("kpi-aes", "--");
+    drawCategorie_({}); drawAgeCards_({}); drawContratCards_({});
+    return;
+  }
+  setTxt_("kpi-nbpers", fmtNum_(k.personnel));
+  setTxt_("kpi-nbpers-sub", "début: " + fmtNum_(k.effectifDebut) + " | fin: " + fmtNum_(k.effectifFin));
+  setTxt_("kpi-recrut", fmtNum_(k.nbRecrutements));
+  setTxt_("kpi-depart", fmtNum_(k.nbDeparts));
+  drawCategorie_(c?.categorie || {});
+  drawFlux_(c?.flux || {});
+  drawGenre_(c?.genre || {});
+  drawAgeCards_(c?.age || {});
+  drawContratCards_(c?.contrat || {});
+  renderKpisExtra_(kpisExtra || {});
+
+  RH_STATE.congesCache = conges || {};
+  if (RH_STATE.activeTab === "conges") renderCongesPage_();
+}
+
+function renderKpisExtra_(kx){
+  setTxt_("kpi-tauxabs", fmtPct_(kx.tauxAbsenteisme));
+  setTxt_("kpi-turnover2", fmtPct_(kx.turnover));
+  setTxt_("kpi-at", fmtNum_(kx.at));
+  setTxt_("kpi-aes", fmtNum_(kx.aes));
+}
+
+function drawContratCards_(contratObj){
+  const grid = document.getElementById("rhContratGrid"); if (!grid) return;
+  const items = [ { key: "CDI", label: "CDI" }, { key: "CDD", label: "CDD" }, { key: "STAGE", label: "Stage" }, { key: "ND", label: "Non défini" } ];
+  const values = items.map(it => Number(contratObj[it.key] || 0));
+  const total = values.reduce((a,b)=>a+b,0);
+  grid.innerHTML = "";
+  items.forEach((it, idx) => {
+    const v = values[idx]; const pct = total > 0 ? Math.round((v/total)*100) : 0;
+    const card = document.createElement("div"); card.className = "age-card";
+    const top = document.createElement("div"); top.className = "age-top";
+    const val = document.createElement("div"); val.className = "age-val"; val.textContent = fmtNum_(v);
+    const p = document.createElement("div"); p.className = "age-pct"; p.textContent = pct + "%";
+    top.appendChild(val); top.appendChild(p);
+    const lab = document.createElement("div"); lab.className = "age-label"; lab.textContent = it.label;
+    const bar = document.createElement("div"); bar.className = "age-bar";
+    const fill = document.createElement("div"); fill.className = "age-fill"; fill.style.width = pct + "%";
+    bar.appendChild(fill); card.appendChild(top); card.appendChild(lab); card.appendChild(bar);
+    grid.appendChild(card);
+  });
+}
+
+function drawCategorie_(catObj) {
+  const box = document.getElementById("rhCatList"); if (!box) return;
+  const labels = ["Paramédical", "Direction", "Hébergement", "Stagiaires"];
+  const values = labels.map(l => Number(catObj[l] || 0));
+  const total = values.reduce((a,b)=>a+b,0);
+  const colors = { "Paramédical": "#0EA5E9", "Direction": "#10B981", "Hébergement": "#3B82F6", "Stagiaires": "#8B5CF6" };
+  box.innerHTML = "";
+  labels.forEach((label, i) => {
+    const v = values[i]; const pct = total > 0 ? Math.round((v / total) * 100) : 0;
+    const row = document.createElement("div"); row.className = "cat-row";
+    const lab = document.createElement("div"); lab.className = "cat-label"; lab.textContent = label;
+    const bar = document.createElement("div"); bar.className = "cat-bar";
+    const fill = document.createElement("div"); fill.className = "cat-fill"; fill.style.background = colors[label] || "#0EA5E9"; fill.style.width = pct + "%";
+    bar.appendChild(fill);
+    const pctEl = document.createElement("div"); pctEl.className = "cat-pct"; pctEl.textContent = pct + "%";
+    row.title = label + " : " + fmtNum_(v) + " (" + pct + "%)";
+    row.onmousemove = (ev) => { showHoverTip_("<div style='font-size:12px;font-weight:900'>" + label + "</div><div style='opacity:.9;margin-top:2px'>valeur : " + fmtNum_(v) + " • " + pct + "%</div>", ev.clientX, ev.clientY); };
+    row.onmouseleave = hideHoverTip_;
+    row.onclick = () => openRhHistory_("categorie", label, "Historique — " + label);
+    row.appendChild(lab); row.appendChild(bar); row.appendChild(pctEl); box.appendChild(row);
+  });
+}
+
+function drawAgeCards_(ageObj) {
+  const grid = document.getElementById("rhAgeGrid"); if (!grid) return;
+  const items = [ { key: "20-30", label: "de 20 à 30 ans" }, { key: "30-45", label: "de 30 à 45 ans" }, { key: "45-55", label: "de 45 à 55 ans" }, { key: ">55",  label: "> 55 ans" } ];
+  const values = items.map(it => Number(ageObj[it.key] || 0));
+  const total = values.reduce((a,b)=>a+b,0);
+  grid.innerHTML = "";
+  items.forEach((it, idx) => {
+    const v = values[idx]; const pct = total > 0 ? Math.round((v/total)*100) : 0;
+    const card = document.createElement("div"); card.className = "age-card";
+    const top = document.createElement("div"); top.className = "age-top";
+    const val = document.createElement("div"); val.className = "age-val"; val.textContent = fmtNum_(v);
+    const p = document.createElement("div"); p.className = "age-pct"; p.textContent = pct + "%";
+    top.appendChild(val); top.appendChild(p);
+    const lab = document.createElement("div"); lab.className = "age-label"; lab.textContent = it.label;
+    const bar = document.createElement("div"); bar.className = "age-bar";
+    const fill = document.createElement("div"); fill.className = "age-fill"; fill.style.width = pct + "%";
+    bar.appendChild(fill); card.appendChild(top); card.appendChild(lab); card.appendChild(bar);
+    card.onclick = () => openRhHistory_("age", it.key, "Historique — Tranche " + it.key);
+    grid.appendChild(card);
+  });
+}
+
+function drawDonut_(canvasId, labels, values, colors, centerTop, centerBottom, centerColor, onClickLabel) {
+  ensureDataLabels_();
+  const ctx = document.getElementById(canvasId)?.getContext("2d"); if (!ctx) return;
+  destroyChart_(canvasId);
+  rhCharts[canvasId] = new Chart(ctx, {
+    type: "doughnut",
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: "70%",
+      plugins: { legend: { display: true, position: "bottom", labels: { usePointStyle:true, boxWidth:8, font:{weight:"900"} } }, tooltip: commonTooltip_(), datalabels: { display: false } },
+      onClick: (_, els) => { if (!els || !els.length) return; const i = els[0].index; if (onClickLabel) onClickLabel(labels[i]); }
+    },
+    plugins: [{
+      id: canvasId + "_center",
+      afterDraw(chart) {
+        const {ctx, chartArea:{left, right, top, bottom}} = chart;
+        const x = (left + right) / 2; const y = (top + bottom) / 2;
+        ctx.save(); ctx.textAlign = "center"; ctx.fillStyle = centerColor || "#0B2B5C"; ctx.font = "900 14px Segoe UI";
+        ctx.fillText(centerTop || "", x, y - 8); ctx.font = "1000 20px Segoe UI"; ctx.fillText(centerBottom || "", x, y + 16); ctx.restore();
+      }
+    }]
+  });
+}
+
+function drawFlux_(flux) {
+  const fin = Number(flux.in || 0); const fout = Number(flux.out || 0); const solde = fin - fout;
+  const soldeColor = solde >= 0 ? "#10B981" : "#EF4444";
+  drawDonut_("chartRhFlux", ["Entrants","Sortants"], [fin, fout], ["#10B981", "#EF4444"], "Solde", (solde > 0 ? "+" : "") + solde, soldeColor, (clickedLabel) => openRhHistory_("flux", clickedLabel, "Historique — " + clickedLabel));
+}
+
+function drawGenre_(g) {
+  const femmes = Number(g.femmes || 0); const hommes = Number(g.hommes || 0); const tot = femmes + hommes;
+  const pctFemme = tot > 0 ? Math.round((femmes/tot)*100) + "%" : "0%";
+  drawDonut_("chartRhGenre", ["Femmes","Hommes"], [femmes, hommes], ["#EC4899", "#3B82F6"], pctFemme, "FEMMES", "#EC4899", (clickedLabel) => openRhHistory_("genre", clickedLabel, "Historique — " + clickedLabel));
+}
+
+function loadRHMasse_(ent, mois, annee){
+  if(!document.getElementById("rhChartMasse")) return;
+  google.script.run
+    .withSuccessHandler(res => { renderRHMasse_(res); })
+    .withFailureHandler(err => {
+      console.error("apiRHMasse error:", err);
+      setTxt_("kpi-ms-budget", "--"); setTxt_("kpi-ms-real", "--"); setTxt_("kpi-ms-taux", "--"); setTxt_("kpi-var-total", "--");
+    })
+    .apiRHMasse({ entite: ent || "ALL", annee: annee || "", mois: mois || "" });
+}
+
+function destroyChart_(id) { if (rhCharts[id]) { rhCharts[id].destroy(); delete rhCharts[id]; } }
+function ensureDataLabels_() {
+  if (window.Chart && window.ChartDataLabels && !window.__RH_DATALABELS_REGISTERED__) {
+    Chart.register(ChartDataLabels); window.__RH_DATALABELS_REGISTERED__ = true;
+  }
+}
+
+function commonTooltip_() { return { enabled: true, backgroundColor: "rgba(16,24,40,0.92)", titleColor: "#fff", bodyColor: "#fff", padding: 12, cornerRadius: 12 }; }
+
+function renderRHMasse_(res){
+  if(!res) return;
+  const selectedM = (res.selected && res.selected.masse) ? res.selected.masse : (res.masse && res.masse.selected ? res.masse.selected : null);
+  const selectedV = (res.selected && res.selected.vars)  ? res.selected.vars  : (res.variables && res.variables.selected ? res.variables.selected : null);
+  
+  if(selectedM){
+    setTxt_("kpi-ms-budget", fmtNum_(selectedM.budget));
+    setTxt_("kpi-ms-real", fmtNum_(selectedM.realise!=null ? selectedM.realise : selectedM.real));
+    const tVal = selectedM.budget > 0 ? ( (selectedM.realise!=null ? selectedM.realise : selectedM.real) / selectedM.budget ) * 100 : 0;
+    setTxt_("kpi-ms-taux", Math.round(tVal) + "%");
+    setTxt_("kpi-ms-budget-sub", selectedM.mois || ""); setTxt_("kpi-ms-real-sub", selectedM.mois || "");
+    const chipM = (selectedM.mois && String(selectedM.mois).trim()) ? String(selectedM.mois).trim() : "global";
+    setTxt_("kpi-ms-budget-chip", chipM); setTxt_("kpi-ms-real-chip", chipM); setTxt_("kpi-ms-taux-chip", chipM);
+  }
+
+  if(selectedV){
+    setTxt_("kpi-var-total", fmtNum_(selectedV.total));
+    const chipV = (selectedV.mois && String(selectedV.mois).trim()) ? String(selectedV.mois).trim() : "global";
+    setTxt_("kpi-var-total-chip", chipV);
+    const monthNameFR_ = (ym) => {
+      const s = String(ym||""); const parts = s.split("-"); const mm = parts[1] || ""; const yyyy = parts[0] || "";
+      const map = {"01":"JAN","02":"FEV","03":"MAR","04":"AVR","05":"MAI","06":"JUN","07":"JUI","08":"AOU","09":"SEP","10":"OCT","11":"NOV","12":"DEC"};
+      return (map[mm] || mm) + " " + yyyy;
+    };
+    setTxt_("rhMasseDetailTitle", "DÉTAIL DU MOIS : " + monthNameFR_(selectedV.mois)); setTxt_("rhMasseDetailBadge", selectedV.mois || "—");
+    
+    const fmtMoney = (v)=>{ return Math.round(Number(v||0)).toLocaleString('fr-FR'); };
+    const vActes = Number(selectedV.actes||0); const vGarde = Number(selectedV.garde||0); const vDf = Number(selectedV.df||0); const vAutres = Number(selectedV.autres||0); const total = Number(selectedV.total||0);
+    const pctActes = total > 0 ? (vActes / total * 100) : 0; const pctGarde = total > 0 ? (vGarde / total * 100) : 0; const pctDf = total > 0 ? (vDf / total * 100) : 0; const pctAutres = total > 0 ? (vAutres / total * 100) : 0;
+
+    const barActes = document.getElementById("rhBarActes"); if(barActes) barActes.style.width = Math.min(100, Math.max(0, pctActes)) + "%";
+    setTxt_("rhValActes", fmtMoney(vActes)); setTxt_("rhPctActes", pctActes.toLocaleString('fr-FR',{maximumFractionDigits:1}) + "%");
+    const barGarde = document.getElementById("rhBarGarde"); if(barGarde) barGarde.style.width = Math.min(100, Math.max(0, pctGarde)) + "%";
+    setTxt_("rhValGarde", fmtMoney(vGarde)); setTxt_("rhPctGarde", pctGarde.toLocaleString('fr-FR',{maximumFractionDigits:1}) + "%");
+    const barDf = document.getElementById("rhBarDf"); if(barDf) barDf.style.width = Math.min(100, Math.max(0, pctDf)) + "%";
+    setTxt_("rhValDf", fmtMoney(vDf)); setTxt_("rhPctDf", pctDf.toLocaleString('fr-FR',{maximumFractionDigits:1}) + "%");
+    const barAutres = document.getElementById("rhBarAutres"); if(barAutres) barAutres.style.width = Math.min(100, Math.max(0, pctAutres)) + "%";
+    setTxt_("rhValAutres", fmtMoney(vAutres)); setTxt_("rhPctAutres", pctAutres.toLocaleString('fr-FR',{maximumFractionDigits:1}) + "%");
+  } else {
+    setTxt_("rhMasseDetailTitle", "DÉTAIL DU MOIS : —"); setTxt_("rhMasseDetailBadge", "—");
+    ["Actes","Garde","Df","Autres"].forEach((k)=>{ const bar = document.getElementById("rhBar"+k); if(bar) bar.style.width="0%"; setTxt_("rhVal"+k, "—"); setTxt_("rhPct"+k, "—"); });
+  }
+
+  const trimestre = (RH_STATE && RH_STATE.trimestre) ? RH_STATE.trimestre : "";
+  const keepQuarter_ = (ym) => {
+    if(!trimestre) return true;
+    const q = Number(String(trimestre).replace("T","")) || 0; if(!q) return true;
+    const m = Number(String(ym||"").split("-")[1] || 0);
+    if(m<=3) return q===1; if(m<=6) return q===2; if(m<=9) return q===3; return q===4;
+  };
+
+  let serieM = [];
+  if(res.series && Array.isArray(res.series.months)){
+    const months = res.series.months || []; const budget = res.series.budget || []; const real = res.series.real || [];
+    serieM = months.map((m,i)=>({
+        mois: m, budget: Number(budget[i]||0), realise: Number(real[i]||0),
+        taux: budget[i] > 0 ? (real[i] / budget[i]) * 100 : 0
+    })).filter(x => keepQuarter_(x.mois));
+  }
+  drawMasseVsBudget_(serieM);
+}
+
+function drawMasseVsBudget_(serie) {
+  ensureDataLabels_(); destroyChart_("rhChartMasse");
+  const el = document.getElementById("rhChartMasse"); if (!el) return;
+
+  const labels = (serie||[]).map(x => monthLabelShort_(x.mois));
+  const labelsFull = (serie||[]).map(x => x.mois);
+  const budget = (serie||[]).map(x => Number(x.budget||0));
+  const real   = (serie||[]).map(x => Number(x.realise||0));
+  const taux   = (serie||[]).map(x => x.taux);
+
+  const ctx = el.getContext("2d");
+  const colorBudget = "#FBBF24"; const colorReal = "#8B5CF6"; const colorLine = "#F59E0B";
+
+  rhCharts["rhChartMasse"] = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar", label: "Budget", data: budget, backgroundColor: colorBudget, borderRadius: 8, maxBarThickness: 45, order: 2,
+          datalabels: { display: true, align: "top", anchor: "end", color: "#475569", font: { weight: "900", size: 11 }, formatter: v => v ? Math.round(v).toLocaleString('fr-FR') : "" }
+        },
+        {
+          type: "bar", label: "Masse salariale réalisée", data: real, backgroundColor: colorReal, borderRadius: 8, maxBarThickness: 45, order: 1,
+          datalabels: { display: true, align: "top", anchor: "end", color: "#475569", font: { weight: "900", size: 11 }, formatter: v => v ? Math.round(v).toLocaleString('fr-FR') : "" }
+        },
+        {
+          type: "line", label: "Taux de réalisation (%)", data: taux, yAxisID: "y1", tension: 0.4, borderColor: colorLine, backgroundColor: colorLine,
+          pointBackgroundColor: "#fff", pointBorderColor: colorLine, pointBorderWidth: 3, pointRadius: 6, pointHoverRadius: 8, order: 0,
+          datalabels: { display: true, align: "bottom", anchor: "center", offset: 12, color: colorLine, font: { weight: "900", size: 12 }, formatter: v => (v == null || v === 0 ? "" : Math.round(v) + "%") }
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, layout: { padding: { top: 35, bottom: 10 } },
+      plugins: {
+        legend: { position: "top", align: "end", labels: { usePointStyle: true, boxWidth: 10, padding: 16, font: { size: 12, weight: "700" } } },
+        tooltip: Object.assign(commonTooltip_(), {
+          callbacks: { label: (ctx) => {
+            const dsLabel = ctx.dataset.label || "";
+            if (ctx.dataset.type === "line") { return dsLabel + " : " + (ctx.parsed.y==null ? "--" : Math.round(ctx.parsed.y) + "%"); }
+            return dsLabel + " : " + Math.round(ctx.parsed.y).toLocaleString('fr-FR') + " MAD";
+          }}
+        }),
+        datalabels: { display: false }
+      },
+      onClick: (e, _els, chart) => {
+        const pts = chart.getElementsAtEventForMode(e, 'nearest', { intersect: false }, true); if(!pts || !pts.length) return;
+        const i = pts[0].index; const moisFull = (labelsFull && labelsFull[i]) ? labelsFull[i] : (serie[i] ? serie[i].mois : labels[i]);
+        const item = serie[i] || {}; openRhDetailModal_(moisFull, item);
+      },
+      onHover: (e, active) => { if(!e || !e.native || !e.native.target) return; e.native.target.style.cursor = (active && active.length) ? 'pointer' : 'default'; },
+      scales: { y: { display: false, beginAtZero: true }, y1: { display: false, beginAtZero: true, position: "right" }, x: { grid: { display: false }, ticks: { font: { size: 12, weight: "700" }, color: "#475569" } } }
+    }
+  });
+}
+
+function openRhHistory_(kind, key, title) {
+  const mask = document.getElementById("rhModalMask"); const ttl = document.getElementById("rhModalTitle");
+  if (ttl) ttl.textContent = (title ? String(title) : ("historique : " + key));
+  if (mask) mask.style.display = "flex";
+  const ent = (RH_STATE && RH_STATE.entite) ? RH_STATE.entite : (document.getElementById("rhEntite")?.value || "ALL");
+  ensureDataLabels_();
+  google.script.run
+    .withFailureHandler(err => { console.error("apiRHHistory error:", err); alert("Erreur historique RH : " + (err && err.message ? err.message : err)); })
+    .withSuccessHandler(res => {
+      const cv = document.getElementById("rhHistChart"); if (!cv) return;
+      const ctx = cv.getContext("2d"); if (window.rhHistoryChart) window.rhHistoryChart.destroy();
+      const months = res.months || []; const data = (res.points || []).map(p => Number(p.value) || 0);
+      window.rhHistoryChart = new Chart(ctx, {
+        type: "line",
+        data: { labels: months, datasets: [{ label: res.label || key, data, borderColor: "#2e90fa", backgroundColor: "rgba(46,144,250,0.10)", fill: true, tension: 0.35, pointRadius: 4, pointHoverRadius: 6 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, datalabels: { display: true, align: "top", anchor: "end", offset: 2, color: "#0B2B5C", font: { size: 12, weight: "900" }, formatter: (v) => fmtNum_(v) }, tooltip: commonTooltip_() },
+          onHover: (e, active) => { if(!e || !e.native || !e.native.target) return; e.native.target.style.cursor = (active && active.length) ? 'pointer' : 'default'; },
+          scales: { x: { grid: { display: false }, ticks: { font: { size: 12, weight: "800" }, color: "#475467" } }, y: { display: false, beginAtZero: true } }
+        }
+      });
+    })
+    .apiRHHistory({ entite: ent, annee: (RH_STATE.annee||""), kind, key });
+}
+
+function openRhDetailModal_(moisFull, item){
+  const mask = document.getElementById("rhModalMask"); const ttl = document.getElementById("rhModalTitle");
+  if (ttl) ttl.textContent = "détail : " + (monthLabelShort_(moisFull) || moisFull);
+  if (mask) mask.style.display = "flex";
+  const body = document.getElementById("rhModalBody");
+  if (body){
+    const b = fmtNum_(item.budget); const r = fmtNum_(item.realise);
+    const t = item.budget > 0 ? Math.round((item.realise / item.budget) * 100) + "%" : "--";
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px;">
+        <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">budget</div><div style="font-size:22px;font-weight:1000;color:#0B2B5C;margin-top:6px;">${b}</div></div>
+        <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">réalisé</div><div style="font-size:22px;font-weight:1000;color:#0B2B5C;margin-top:6px;">${r}</div></div>
+        <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">% réalisation</div><div style="font-size:22px;font-weight:1000;color:#F59E0B;margin-top:6px;">${t}</div></div>
+      </div>
+    `;
+  }
+}
+
+function openRubriquesDetailModal_(moisFull, item){
+  const mask = document.getElementById("rhModalMask"); const ttl = document.getElementById("rhModalTitle");
+  if (ttl) ttl.textContent = "détail rubriques : " + (monthLabelShort_(moisFull) || moisFull);
+  if (mask) mask.style.display = "flex";
+  const body = document.getElementById("rhModalBody"); if(!body) return;
+  const p = (x)=> (x==null? "--" : (Math.round(Number(x)*100) + "%"));
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px;">
+      <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">actes</div><div style="font-size:22px;font-weight:1000;color:#0EA5E9;margin-top:6px;">${p(item.pctActes)}</div></div>
+      <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">garde</div><div style="font-size:22px;font-weight:1000;color:#6366F1;margin-top:6px;">${p(item.pctGarde)}</div></div>
+      <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">df</div><div style="font-size:22px;font-weight:1000;color:#0B2B5C;margin-top:6px;">${p(item.pctDf)}</div></div>
+      <div style="border:1px solid #E8EEF6;border-radius:14px;padding:12px;background:#FBFDFF;"><div style="font-size:11px;color:#64748B;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">autres</div><div style="font-size:22px;font-weight:1000;color:#0B2B5C;margin-top:6px;">${p(item.pctAutres)}</div></div>
+    </div>
+  `;
+}
+
+function closeRhModal_() { const mask = document.getElementById("rhModalMask"); if (mask) mask.style.display = "none"; }
+
+window.setRhTab = function(tab){
+  RH_STATE.activeTab = tab;
+  const pages = { global: document.getElementById("rhPageGlobal"), masse: document.getElementById("rhPageMasse"), conges: document.getElementById("rhPageConges") };
+  const btns = { global: document.getElementById("rhTabBtnGlobal"), masse: document.getElementById("rhTabBtnMasse"), conges: document.getElementById("rhTabBtnConges") };
+  Object.keys(pages).forEach(key => {
+    if (pages[key]) pages[key].classList.toggle("hidden", key !== tab);
+    if (btns[key]) btns[key].classList.toggle("active", key === tab);
+  });
+  if (tab === "masse") { loadRHMasse_(RH_STATE.entite, RH_STATE.mois, RH_STATE.annee); } 
+  else if (tab === "conges") { loadRHConges_(RH_STATE.entite, RH_STATE.mois); }
+};
+
+function loadRHConges_(ent, mois){
+  if (!document.getElementById("rhChartConges")) return;
+  google.script.run
+    .withSuccessHandler(res => { RH_STATE.congesCache = res; renderCongesPage_(); })
+    .withFailureHandler(err => { console.error("apiRHConges error:", err); })
+    .apiRHConges({ entite: ent || "ALL", mois: mois || "" });
+}
+
+function renderCongesPage_(){
+  const res = RH_STATE.congesCache; if (!res) return;
+  const sel = res.selected || {};
+  const chip = (res.state && res.state.mois) ? String(res.state.mois) : "global";
+  const fmtFull = (v) => { return Math.round(Number(v||0)).toLocaleString('fr-FR'); };
+
+  setTxt_("kpi-conges-personnel", fmtNum_(sel.nbPersonnel));
+  setTxt_("kpi-conges-jours", fmtNum_(sel.totalJours));
+  setTxt_("kpi-conges-provision", fmtFull(sel.provisionTotale) + " MAD");
+  const moy = (sel.nbPersonnel > 0) ? (sel.provisionTotale / sel.nbPersonnel) : 0;
+  setTxt_("kpi-conges-moyenne", fmtFull(moy) + " MAD");
+
+  setTxt_("kpi-conges-mois-chip", chip); setTxt_("kpi-conges-jours-chip", chip); setTxt_("kpi-conges-provision-chip", chip);
+  drawCongesChart_(res.series || []);
+  renderCongesDetailTable_(res.detailParEntite || []);
+}
+
+// CONGES PAYES - CHART (UPDATED AVEC LIGNE DE TENDANCE PROVISION + BULLES JOURS + VARIATIONS)
+function drawCongesChart_(series){
+  ensureDataLabels_(); destroyChart_("rhChartConges");
+  const el = document.getElementById("rhChartConges"); if (!el) return;
+
+  const labels = (series||[]).map(x => monthLabelShort_(x.mois));
+  const provision = (series||[]).map(x => Number(x.provisionTotale||0));
+  const jours = (series||[]).map(x => Number(x.totalJours||0));
+
+  const ctx = el.getContext("2d");
+  const colorProv = "#8B5CF6"; const colorJours = "#10B981";  
+
+  rhCharts["rhChartConges"] = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar", label: "Provision totale (MAD)", data: provision, backgroundColor: "rgba(139, 92, 246, 0.85)", borderRadius: 8, maxBarThickness: 45, yAxisID: "y", order: 3,
+          datalabels: { display: true, align: "top", anchor: "end", offset: 4, color: colorProv, font: { weight: "900", size: 12 }, formatter: v => v ? Math.round(v).toLocaleString('fr-FR') : "" }
+        },
+        {
+          type: "line", label: "Évolution Provision", data: provision, yAxisID: "y", borderColor: colorProv, borderWidth: 2, borderDash: [5, 5], pointRadius: 0, order: 2,
+          datalabels: { display: false }
+        },
+        {
+          type: "line", label: "Total jours de congés", data: jours, yAxisID: "y1", showLine: false, borderColor: colorJours, backgroundColor: colorJours,
+          pointBackgroundColor: "#fff", pointBorderColor: colorJours, pointBorderWidth: 4, pointRadius: 7, pointHoverRadius: 9, order: 1,
+          datalabels: { 
+            display: true, align: "bottom", anchor: "bottom", offset: 12, 
+            color: "#fff", backgroundColor: colorJours, borderRadius: 6, padding: {top: 4, bottom: 4, left: 8, right: 8},
+            font: { weight: "900", size: 11 }, 
+            formatter: (v, ctx) => {
+              if (!v) return "";
+              let txt = Math.round(v).toLocaleString('fr-FR') + " j";
+              if (ctx.dataIndex > 0) {
+                const prev = ctx.dataset.data[ctx.dataIndex - 1];
+                if (prev) {
+                  const diff = Math.round(v - prev);
+                  if (diff > 0) txt += " (+" + diff.toLocaleString('fr-FR') + ")";
+                  else if (diff < 0) txt += " (" + diff.toLocaleString('fr-FR') + ")";
+                  else txt += " (=)";
+                }
+              }
+              return txt;
+            } 
+          }
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, layout: { padding: { top: 35, bottom: 20 } },
+      plugins: {
+        legend: { position: "top", align: "end", labels: { usePointStyle: true, boxWidth: 10, padding: 16, font: { size: 12, weight: "700" } } },
+        tooltip: Object.assign(commonTooltip_(), {
+          callbacks: { label: (ctx) => {
+            if (ctx.dataset.yAxisID === "y1") { 
+              let val = Math.round(ctx.parsed.y).toLocaleString('fr-FR') + " j";
+              if (ctx.dataIndex > 0) {
+                 const prev = ctx.dataset.data[ctx.dataIndex - 1];
+                 if (prev) {
+                    const diff = Math.round(ctx.parsed.y - prev);
+                    if (diff > 0) val += " (+" + diff.toLocaleString('fr-FR') + ")";
+                    else if (diff < 0) val += " (" + diff.toLocaleString('fr-FR') + ")";
+                 }
+              }
+              return ctx.dataset.label + " : " + val; 
+            }
+            return ctx.dataset.label + " : " + Math.round(ctx.parsed.y).toLocaleString('fr-FR') + " MAD";
+          }}
+        })
+      },
+      scales: { y: { display: false, beginAtZero: true }, y1: { display: false, beginAtZero: true, position: "right" }, x: { grid: { display: false }, ticks: { font: { size: 12, weight: "700" }, color: "#475569" } } }
+    }
+  });
+}
+
+function renderCongesDetailTable_(rows){
+  const tbody = document.querySelector("#tableCongesDetail tbody"); if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!rows || !rows.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#94A3B8;">Aucune donnée pour la période sélectionnée</td></tr>'; return; }
+  const fmtFull = (v) => { return Math.round(Number(v||0)).toLocaleString('fr-FR'); };
+  rows.forEach(r => {
+    const moy = (r.nbPersonnel > 0) ? (r.provisionTotale / r.nbPersonnel) : 0;
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + r.entite + "</td><td>" + fmtNum_(r.nbPersonnel) + "</td><td>" + fmtNum_(r.totalJours) + "</td><td>" + fmtFull(r.provisionTotale) + " MAD</td><td>" + fmtFull(moy) + " MAD</td>";
+    tbody.appendChild(tr);
+  });
+}
+
+(function hookRh_(){
+  const orig = window.switchTab;
+  window.switchTab = function(tabId){ if(typeof orig === "function") orig(tabId); if(tabId === "rh") enterRhMode_(); };
+  document.addEventListener("DOMContentLoaded", () => { if(document.getElementById("rhEntite")) { setTimeout(() => enterRhMode_(), 250); } });
+})();
+</script>
