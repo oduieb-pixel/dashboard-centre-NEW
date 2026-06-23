@@ -159,8 +159,28 @@
     </div>
     
     <div id="chartContainer">
-      <div id="mainChartWrapper">
-        <canvas id="kpiChart"></canvas>
+      <div id="mainChartWrapper" style="position:relative; height:380px; width:100%;">
+
+        <!-- ═══ HEADER DRILL-DOWN (NOUVEAU) ═══════════════════════════ -->
+        <div id="flashChartHeader" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; min-height:32px;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+                <span id="flashChartMainTitle" style="font-size:14px; font-weight:600; color:#2c3e50;"></span>
+                <span id="flashChartSubInfo"   style="font-size:12px; font-weight:500; color:#e74c3c; min-height:14px;"></span>
+            </div>
+            <button id="btnFlashBack"
+                onclick="resetFlashDrill()"
+                style="display:none; align-items:center; gap:6px;
+                       background:#f1f5f9; color:#334155;
+                       border:1px solid #cbd5e1;
+                       padding:5px 16px; border-radius:20px;
+                       font-size:12px; font-weight:600; cursor:pointer;
+                       transition:background 0.2s;">
+                &#8592; Retour vue globale
+            </button>
+        </div>
+        <!-- ══════════════════════════════════════════════════════════ -->
+
+        <canvas id="kpiChart" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
         <p id="noDataMessage" style="text-align: center; color: #6c757d; display: none; margin-top:20px;">Aucune donnée à afficher.</p>
       </div>
       <div id="pieChartWrapper">

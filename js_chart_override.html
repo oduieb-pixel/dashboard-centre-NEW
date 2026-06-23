@@ -1,103 +1,253 @@
 <script>
 /* ============================================================ */
-/*  OVERRIDE GRAPHIQUES — STYLE MODERNE PRO                     */
+/*  OVERRIDE GRAPHIQUES — STYLE MODERNE PRO + DRILL-DOWN        */
 /*  Inclure APRÈS js_flash dans Index.html                      */
 /* ============================================================ */
 
 // ============================================================
-// 1. OVERRIDE : renderChart — Graphique principal Flash
+// 0. ÉTAT DRILL-DOWN
+// ============================================================
+window._drillState = {
+    active: false,
+    parentLabels: null,
+    parentDatasets: null,
+    parentTitle: null,
+    parentShowLegend: false,
+    clickedLabel: null,
+    clickedIndex: null
+};
+
+// ============================================================
+// 1. BOUTON RETOUR — injection unique dans le DOM
+// ============================================================
+function _ensureBackButton() {
+    if (document.getElementById('drillBackBtn')) return;
+
+    const chartContainer = document.getElementById('mainChartWrapper');
+    if (!chartContainer) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'drillBackBtn';
+    btn.innerHTML = '← Retour';
+    btn.style.cssText = `
+        display: none;
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        z-index: 10;
+        background: #f1f5f9;
+        color: #334155;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 5px 14px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        transition: background 0.2s;
+    `;
+    btn.onmouseover = () => btn.style.background = '#e2e8f0';
+    btn.onmouseout  = () => btn.style.background = '#f1f5f9';
+    btn.onclick = _drillBack;
+
+    chartContainer.style.position = 'relative';
+    chartContainer.insertBefore(btn, chartContainer.firstChild);
+}
+
+function _showBackButton(show) {
+    const btn = document.getElementById('drillBackBtn');
+    if (btn) btn.style.display = show ? 'inline-flex' : 'none';
+}
+
+// ============================================================
+// 2. LOGIQUE DRILL-DOWN — Calcul du détail (une seule série)
+// ============================================================
+function _computeDrillDetail(clickedLabel, clickedIndex, parentDatasets) {
+    const entite      = document.getElementById('entite')?.value || '';
+    const annee       = document.getElementById('annee')?.value  || '';
+    const familleBtn  = document.querySelector('#familyButtons button.active');
+    const famille     = familleBtn ? familleBtn.getAttribute('data-family') : '';
+    const sousFamille = document.getElementById('sousFamille')?.value || '';
+    const element     = document.getElementById('element')?.value || '';
+
+    const monthNames = ["JAN","FEV","MAR","AVR","MAI","JUIN","JUIL","AOU","SEP","OCT","NOV","DEC"];
+    const isParentMonths  = monthNames.includes(clickedLabel);
+    const isComparatif    = parentDatasets.some(d => d.label === '2025' || d.label === '2026');
+
+    if (!window.normalizedData) return null;
+
+    // Filtre de base (famille + sous-famille + élément)
+    const baseFilter = r => {
+        const famMatch = !famille     || r[2].toString() === famille;
+        const sfMatch  = !sousFamille || r[3].toString() === sousFamille;
+        const elMatch  = !element     || r[4].toString() === element;
+        return famMatch && sfMatch && elMatch;
+    };
+
+    // Année à utiliser : si vue comparative on prend l'année la plus récente présente
+    const anneeCible = isComparatif
+        ? (parentDatasets.find(d => d.label === '2026') ? '2026' : '2025')
+        : annee;
+
+    // ── CAS A : clic sur un mois → détail par Élément ────────────────────
+    if (isParentMonths) {
+        const rows = normalizedData.filter(r =>
+            baseFilter(r) &&
+            (!entite     || r[0] === entite) &&
+            (!anneeCible || r[6].toString() === anneeCible) &&
+            r[1] === clickedLabel
+        );
+
+        const agg = {};
+        rows.forEach(r => { const k = r[4].toString(); agg[k] = (agg[k] || 0) + (parseFloat(r[5]) || 0); });
+
+        const sorted = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 15);
+        if (sorted.length === 0) return null;
+
+        const newData = sorted.map(x => x[1]);
+        return {
+            labels:     sorted.map(x => x[0]),
+            datasets:   [{ label: clickedLabel, data: newData, backgroundColor: _buildBarColors(newData), borderRadius: 10, barPercentage: 0.6 }],
+            title:      `Détail ${clickedLabel} ${anneeCible} — par Élément`,
+            showLegend: false
+        };
+    }
+
+    // ── CAS B : clic sur une entité → détail par Mois ────────────────────
+    const rows = normalizedData.filter(r =>
+        baseFilter(r) &&
+        r[0] === clickedLabel &&
+        (!anneeCible || r[6].toString() === anneeCible)
+    );
+
+    const agg = {};
+    monthNames.forEach(m => agg[m] = 0);
+    rows.forEach(r => { const m = r[1].toString(); if (agg[m] !== undefined) agg[m] += (parseFloat(r[5]) || 0); });
+
+    const filled = monthNames.filter(m => agg[m] > 0);
+    if (filled.length === 0) return null;
+
+    const newData = filled.map(m => agg[m]);
+    return {
+        labels:     filled,
+        datasets:   [{ label: clickedLabel, data: newData, backgroundColor: _buildBarColors(newData), borderRadius: 10, barPercentage: 0.6 }],
+        title:      `Détail ${clickedLabel} ${anneeCible} — par Mois`,
+        showLegend: false
+    };
+}
+
+// Couleurs dynamiques (vert max, rouge min, violet reste)
+function _buildBarColors(data) {
+    const ctx2 = document.getElementById('kpiChart').getContext('2d');
+    const grad = ctx2.createLinearGradient(0, 0, 0, 400);
+    grad.addColorStop(0, '#6366f1'); grad.addColorStop(1, '#a78bfa');
+    const maxVal = Math.max(...data);
+    const minVal = Math.min(...data.filter(v => v > 0));
+    return data.map(v => v === maxVal ? '#10b981' : (v === minVal && v > 0) ? '#ef4444' : grad);
+}
+
+// ============================================================
+// 3. RETOUR AU GRAPHIQUE PARENT
+// ============================================================
+function _drillBack() {
+    const s = window._drillState;
+    if (!s.active) return;
+
+    s.active = false;
+    _showBackButton(false);
+
+    // Re-render le graphique parent
+    window.renderChart(s.parentLabels, s.parentDatasets, false, null, s.parentTitle, s.parentShowLegend);
+}
+
+// ============================================================
+// 4. OVERRIDE renderChart — Style Pro + Drill-down
 // ============================================================
 window.renderChart = function(labels, datasets, isStacked, groupByAxis, chartTitle, showLegend) {
+    _ensureBackButton();
+
     const ctx = document.getElementById('kpiChart').getContext('2d');
     if (window.kpiChartInstance) window.kpiChartInstance.destroy();
-    if (labels.length === 0) { document.getElementById('noDataMessage').style.display = 'block'; return; }
+    if (labels.length === 0) {
+        document.getElementById('noDataMessage').style.display = 'block';
+        return;
+    }
     document.getElementById('noDataMessage').style.display = 'none';
     const isDark = document.body.classList.contains('dark-mode');
 
-    // Gradient violet pro
+    // Gradients
     const grad2026 = ctx.createLinearGradient(0, 0, 0, 400);
     grad2026.addColorStop(0, '#6366f1');
     grad2026.addColorStop(1, '#a78bfa');
-
     const grad2025 = ctx.createLinearGradient(0, 0, 0, 400);
     grad2025.addColorStop(0, '#cbd5e1');
     grad2025.addColorStop(1, '#e2e8f0');
 
-    // Appliquer les gradients
     datasets.forEach(ds => {
         if (ds.label === '2026' || ds.label === new Date().getFullYear().toString()) {
             ds.backgroundColor = grad2026;
-            ds.borderRadius = 10;
-            ds.borderSkipped = false;
-            ds.barPercentage = 0.55;
-            ds.categoryPercentage = 0.75;
+            ds.borderRadius = 10; ds.borderSkipped = false;
+            ds.barPercentage = 0.55; ds.categoryPercentage = 0.75;
         } else if (ds.label === '2025') {
             ds.backgroundColor = grad2025;
-            ds.borderRadius = 10;
-            ds.borderSkipped = false;
-            ds.barPercentage = 0.55;
-            ds.categoryPercentage = 0.75;
+            ds.borderRadius = 10; ds.borderSkipped = false;
+            ds.barPercentage = 0.55; ds.categoryPercentage = 0.75;
         } else if (ds.type === 'bar') {
-            ds.backgroundColor = grad2026;
-            ds.borderRadius = 10;
-            ds.borderSkipped = false;
-            ds.barPercentage = 0.5;
+            if (!Array.isArray(ds.backgroundColor)) {
+                ds.backgroundColor = grad2026;
+            }
+            ds.borderRadius = 10; ds.borderSkipped = false; ds.barPercentage = 0.5;
         }
-        // Ligne moyenne
         if (ds.type === 'line') {
-            ds.borderColor = '#f59e0b';
-            ds.borderWidth = 2;
-            ds.borderDash = [6, 4];
-            ds.pointRadius = 0;
+            ds.borderColor = '#f59e0b'; ds.borderWidth = 2;
+            ds.borderDash = [6, 4]; ds.pointRadius = 0;
         }
     });
 
-    // Calculer les variations M vs M-1 pour l'affichage
+    // Plugin variations M vs M-1 (uniquement si axe X = mois)
+    const _monthNames = ["JAN","FEV","MAR","AVR","MAI","JUIN","JUIL","AOU","SEP","OCT","NOV","DEC"];
+    const _labelsAreMonths = labels.length > 0 && labels.every(l => _monthNames.includes(l));
+
     const variationPlugin = {
         id: 'variationLabels',
-        afterDraw: function(chart) {
+        afterDraw(chart) {
+            if (!_labelsAreMonths) return;
             const ctx = chart.ctx;
-            const meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
-            
-            // Ne montrer les variations que si on a un seul dataset de barres
             const barDatasets = chart.data.datasets.filter(d => d.type === 'bar' || !d.type);
+
             if (barDatasets.length === 1) {
                 const data = barDatasets[0].data;
+                const metaIdx = chart.data.datasets.indexOf(barDatasets[0]);
+                const meta = chart.getDatasetMeta(metaIdx);
                 meta.data.forEach((bar, i) => {
                     if (i > 0 && data[i] > 0 && data[i-1] > 0) {
                         const variation = ((data[i] - data[i-1]) / data[i-1] * 100).toFixed(0);
                         const isPos = variation >= 0;
-                        const txt = (isPos ? '▲' : '▼') + Math.abs(variation) + '%';
-                        
                         ctx.save();
-                        ctx.font = 'bold 13px "Plus Jakarta Sans", sans-serif';
+                        ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
                         ctx.textAlign = 'center';
                         ctx.fillStyle = isPos ? '#10b981' : '#ef4444';
-                        ctx.fillText(txt, bar.x, bar.y - 24);
+                        ctx.fillText((isPos ? '▲' : '▼') + Math.abs(variation) + '%', bar.x, bar.y - 24);
                         ctx.restore();
                     }
                 });
             }
-            
-            // Comparaison 2025 vs 2026 : montrer les variations
+
             if (barDatasets.length === 2) {
-                const data2025 = barDatasets.find(d => d.label === '2025');
-                const data2026 = barDatasets.find(d => d.label === '2026');
-                if (data2025 && data2026) {
-                    const meta2026 = chart.getDatasetMeta(chart.data.datasets.indexOf(data2026));
-                    meta2026.data.forEach((bar, i) => {
-                        const v25 = data2025.data[i];
-                        const v26 = data2026.data[i];
+                const d25 = barDatasets.find(d => d.label === '2025');
+                const d26 = barDatasets.find(d => d.label === '2026');
+                if (d25 && d26) {
+                    const m26 = chart.getDatasetMeta(chart.data.datasets.indexOf(d26));
+                    m26.data.forEach((bar, i) => {
+                        const v25 = d25.data[i]; const v26 = d26.data[i];
                         if (v25 > 0 && v26 > 0) {
                             const variation = ((v26 - v25) / v25 * 100).toFixed(0);
                             const isPos = variation >= 0;
-                            const txt = (isPos ? '▲' : '▼') + Math.abs(variation) + '%';
-                            
                             ctx.save();
-                            ctx.font = 'bold 13px "Plus Jakarta Sans", sans-serif';
+                            ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
                             ctx.textAlign = 'center';
                             ctx.fillStyle = isPos ? '#10b981' : '#ef4444';
-                            ctx.fillText(txt, bar.x, bar.y - 24);
+                            ctx.fillText((isPos ? '▲' : '▼') + Math.abs(variation) + '%', bar.x, bar.y - 24);
                             ctx.restore();
                         }
                     });
@@ -106,185 +256,494 @@ window.renderChart = function(labels, datasets, isStacked, groupByAxis, chartTit
         }
     };
 
-    window.kpiChartInstance = new Chart(ctx, { 
-        type: 'bar', 
-        data: { labels: labels, datasets: datasets },
+    // Rotation labels X selon nb de barres
+    const tickRotation = labels.length > 8 ? 35 : 0;
+
+    window.kpiChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
         plugins: [variationPlugin],
-        options: { 
-            responsive: true, 
+        options: {
+            responsive: true,
             maintainAspectRatio: false,
             layout: { padding: { top: 45, bottom: 10, left: 5, right: 5 } },
-            plugins: { 
-                legend: { 
-                    display: showLegend, 
+            plugins: {
+                legend: {
+                    display: showLegend,
                     position: 'top',
                     align: 'end',
-                    labels: { 
+                    labels: {
                         color: isDark ? '#94a3b8' : '#64748b',
                         usePointStyle: true,
                         pointStyle: 'rectRounded',
                         padding: 20,
                         font: { size: 12, weight: '700', family: "'Plus Jakarta Sans', sans-serif" }
-                    } 
-                }, 
-                datalabels: { 
+                    }
+                },
+                datalabels: {
                     color: isDark ? '#e2e8f0' : '#1e293b',
-                    font: { weight: '800', size: 13, family: "'Plus Jakarta Sans', sans-serif" }, 
-                    anchor: 'end', 
-                    align: 'top', 
-                    offset: 2,
-                    formatter: function(v) { return v > 0 ? formatValue(v) : null; }
-                }, 
-                title: { 
-                    display: true, 
-                    text: chartTitle, 
+                    font: { weight: '800', size: 12, family: "'Plus Jakarta Sans', sans-serif" },
+                    anchor: 'end', align: 'top', offset: 2,
+                    formatter: v => v > 0 ? formatValue(v) : null
+                },
+                title: {
+                    display: true,
+                    text: chartTitle,
                     font: { size: 14, weight: '800', family: "'Plus Jakarta Sans', sans-serif" },
                     color: isDark ? '#e2e8f0' : '#1e293b',
                     padding: { bottom: 20 },
                     align: 'start'
-                } 
-            }, 
-            scales: { 
-                x: { 
-                    stacked: false, 
+                },
+                tooltip: {
+                    callbacks: {
+                        footer: () => !window._drillState.active ? '🔍 Cliquez pour le détail' : ''
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: false,
                     grid: { display: false },
                     border: { display: false },
-                    ticks: { 
-                        color: isDark ? '#64748b' : '#94a3b8',
-                        font: { size: 11, weight: '700', family: "'Plus Jakarta Sans', sans-serif" },
-                        padding: 8
-                    } 
-                }, 
-                y: { 
-                    display: false
-                } 
+                    ticks: {
+                        color: isDark ? '#64748b' : '#64748b',
+                        font: { size: 12, weight: '600', family: "'Plus Jakarta Sans', sans-serif" },
+                        padding: 8,
+                        maxRotation: tickRotation,
+                        minRotation: 0,
+                        autoSkip: false
+                    }
+                },
+                y: { display: false }
             },
-            animation: {
-                duration: 800,
-                easing: 'easeOutQuart'
+            animation: { duration: 500, easing: 'easeOutQuart' },
+            onClick(event, elements) {
+                if (!elements || elements.length === 0) return;
+                // Pas de drill en vue Maternité Nuitées
+                if (window._materniteActive && window._materniteView === 'NUITEES') return;
+
+                // Drill spécial vue Actes : affiche Césarienne + Accouchement séparément
+                if (window._materniteActive && window._materniteView === 'ACTES') {
+                    const idx = elements[0].index;
+                    const clickedLbl = labels[idx];
+                    const det = window._materniteActesDetail;
+                    if (!det) return;
+
+                    const ctx2 = document.getElementById('kpiChart').getContext('2d');
+                    const gradPink2 = ctx2.createLinearGradient(0, 0, 0, 400);
+                    gradPink2.addColorStop(0, '#ec4899'); gradPink2.addColorStop(1, '#f9a8d4');
+                    const gradRed2 = ctx2.createLinearGradient(0, 0, 0, 400);
+                    gradRed2.addColorStop(0, '#f43f5e'); gradRed2.addColorStop(1, '#fda4af');
+
+                    // Sauvegarde parent
+                    window._drillState.parentLabels     = labels;
+                    window._drillState.parentDatasets   = datasets;
+                    window._drillState.parentTitle      = chartTitle;
+                    window._drillState.parentShowLegend = showLegend;
+
+                    window._drillState.active = true;
+                    _showBackButton(true);
+
+                    window.renderChart(
+                        ['Accouchement normal', 'Césarienne'],
+                        [{
+                            label: clickedLbl,
+                            data: [det.aggA[clickedLbl] || 0, det.aggC[clickedLbl] || 0],
+                            backgroundColor: [gradRed2, gradPink2],
+                            borderRadius: 10, borderSkipped: false,
+                            barPercentage: 0.5, categoryPercentage: 0.7
+                        }],
+                        false, null,
+                        'Détail Actes ' + clickedLbl,
+                        false
+                    );
+                    window._drillState.active = true;
+                    return;
+                }
+
+                const idx         = elements[0].index;
+                const clickedLbl  = labels[idx];
+
+                // Sauvegarde contexte parent si pas encore en drill
+                if (!window._drillState.active) {
+                    window._drillState.parentLabels     = labels;
+                    window._drillState.parentDatasets   = datasets;
+                    window._drillState.parentTitle      = chartTitle;
+                    window._drillState.parentShowLegend = showLegend;
+                    window._drillState.clickedLabel     = clickedLbl;
+                    window._drillState.clickedIndex     = idx;
+                }
+
+                const detail = _computeDrillDetail(clickedLbl, idx, datasets);
+                if (!detail) return; // Pas de drill disponible
+
+                window._drillState.active = true;
+                _showBackButton(true);
+
+                // Rendu du graphique détail
+                window.renderChart(
+                    detail.labels,
+                    detail.datasets,
+                    false, null,
+                    detail.title,
+                    detail.showLegend
+                );
+
+                // Après le render du détail, on remet l'état active=true
+                // (renderChart remet active=false via _drillBack si appelé)
+                window._drillState.active = true;
             }
-        } 
+        }
     });
 };
 
 // ============================================================
-// 2. OVERRIDE : openHistoryModal — Graphique Occupation/Capacité
+// 5. MODULE MATERNITÉ — Boutons Nuitées / Actes
+// ============================================================
+window._materniteView  = 'NUITEES';
+window._materniteActive = false; // flag pour bloquer drill-down en vue Nuitées
+
+function _isMaterniteActive() {
+    const familleBtn  = document.querySelector('#familyButtons button.active');
+    const famille     = familleBtn ? familleBtn.getAttribute('data-family') : '';
+    const sousFamille = document.getElementById('sousFamille')?.value || '';
+    return famille === 'Maternité' ||
+           (famille === 'Hospitalisation' && sousFamille.toUpperCase().includes('MATERNIT'));
+}
+
+function _ensureMaterniteButtons() {
+    if (document.getElementById('matViewBtns')) return;
+    const wrapper = document.getElementById('mainChartWrapper');
+    if (!wrapper) return;
+    wrapper.style.position = 'relative';
+
+    const group = document.createElement('div');
+    group.id = 'matViewBtns';
+    group.style.cssText = `
+        display: none; position: absolute; top: 10px; right: 12px; z-index: 10;
+        background: white; border: 1px solid #cbd5e1; border-radius: 6px;
+        overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    `;
+    group.innerHTML = `
+        <button id="btnMatNuitees" onclick="window.switchMaterniteView('NUITEES')"
+            style="border:none; padding:5px 14px; font-size:12px; font-weight:700;
+                   cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif;
+                   background:#e0e7ff; color:#3730a3;">🛏 Nuitées</button>
+        <button id="btnMatActes" onclick="window.switchMaterniteView('ACTES')"
+            style="border:none; border-left:1px solid #cbd5e1; padding:5px 14px;
+                   font-size:12px; font-weight:700; cursor:pointer;
+                   font-family:'Plus Jakarta Sans',sans-serif;
+                   background:white; color:#64748b;">✂️ Actes</button>
+    `;
+    wrapper.insertBefore(group, wrapper.firstChild);
+}
+
+function _showMaterniteButtons(show) {
+    const g = document.getElementById('matViewBtns');
+    if (g) g.style.display = show ? 'flex' : 'none';
+}
+
+function _updateMatBtnStyles() {
+    const btnN = document.getElementById('btnMatNuitees');
+    const btnA = document.getElementById('btnMatActes');
+    if (!btnN || !btnA) return;
+    if (window._materniteView === 'NUITEES') {
+        btnN.style.background = '#e0e7ff'; btnN.style.color = '#3730a3';
+        btnA.style.background = 'white';   btnA.style.color = '#64748b';
+    } else {
+        btnA.style.background = '#e0e7ff'; btnA.style.color = '#3730a3';
+        btnN.style.background = 'white';   btnN.style.color = '#64748b';
+    }
+}
+
+window.switchMaterniteView = function(view) {
+    window._materniteView = view;
+    _updateMatBtnStyles();
+    _renderMaterniteChart();
+};
+
+// ── Occupation Maternité dans headerMetrics ───────────────────────────────
+function _renderMaterniteHeader() {
+    const entite   = document.getElementById('entite')?.value  || '';
+    const annee    = document.getElementById('annee')?.value   || '';
+    const mois     = document.getElementById('mois')?.value    || '';
+    const trim     = document.getElementById('trimestre')?.value || '';
+    const targetM  = (typeof determineTargetMonth === 'function') ? determineTargetMonth(mois, trim) : (mois || 'DEC');
+    const anneeCap = annee || new Date().getFullYear().toString();
+
+    // Nuitées totales (pour T.O.)
+    const dateOk = r => {
+        if (mois) return r[1] === mois;
+        if (trim && window.quarters) return window.quarters[trim]?.includes(r[1]);
+        return true;
+    };
+    const totalNuitees = normalizedData.filter(r =>
+        r[2] === 'Maternité' && r[3] === 'Nombre de nuitées' &&
+        (!entite || r[0] === entite) &&
+        r[6].toString() === anneeCap && dateOk(r)
+    ).reduce((s, r) => s + (parseFloat(r[5]) || 0), 0);
+
+    // Capacité Lits Maternité
+    let lits = null;
+    if (window.extraCapacityData) {
+        Object.keys(window.extraCapacityData).forEach(key => {
+            const parts   = key.split('_');
+            const kEntite = parts[0];
+            const kLabel  = parts.slice(1).join('_').toUpperCase();
+            const entiteOk = !entite || entite === '' || kEntite === entite;
+            if (entiteOk && kLabel.includes('MATERNIT') && window.extraCapacityData[key][anneeCap]) {
+                const cap = (typeof getSmartCapacity === 'function')
+                    ? getSmartCapacity(window.extraCapacityData[key][anneeCap], targetM)
+                    : null;
+                if (cap !== null) lits = (lits || 0) + cap;
+            }
+        });
+    }
+
+    // Calcul T.O.
+    let toHtml = '';
+    if (lits && lits > 0 && typeof getDiviseurJours === 'function') {
+        const days = getDiviseurJours([], mois, anneeCap);
+        const theo = lits * days;
+        const to   = theo > 0 ? (totalNuitees / theo) * 100 : 0;
+        const toClass = to > 100 ? 'alert' : 'good';
+        toHtml = `
+            <div class="metric-pill" style="background:var(--pill-bg,#f8fafc); border:1px solid var(--pill-border,#e2e8f0); cursor:pointer;"
+                 onclick="openHistoryModal('occupation','${entite}','Maternité','')" title="Voir évolution">
+                <div class="metric-icon">
+                    <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 10v4h6v-4H9z"/></svg>
+                </div>
+                <div class="metric-info">
+                    <span class="metric-val ${toClass}">${Math.round(to)} %</span>
+                    <span class="metric-lbl">Occup.</span>
+                </div>
+            </div>`;
+    }
+
+    let litsHtml = '';
+    if (lits !== null) {
+        litsHtml = `
+            <div class="metric-pill" style="background:var(--pill-bg,#f8fafc); border:1px solid var(--pill-border,#e2e8f0); cursor:pointer;"
+                 onclick="openHistoryModal('capacity','${entite}','Maternité','')" title="Voir évolution">
+                <div class="metric-icon">
+                    <svg viewBox="0 0 24 24"><path d="M19 7h-8v8H3V5H1v15h2v-3h18v3h2v-9c0-2.21-1.79-4-4-4zM7 13c1.66 0 3-1.34 3-3S8.66 7 7 7s-3 1.34-3 3 1.34 3 3 3zm12-1h-6c-1.1 0-2 .9-2 2v3h8v-3c0-1.1-.9-2-2-2z"/></svg>
+                </div>
+                <div class="metric-info">
+                    <span class="metric-val">${lits}</span>
+                    <span class="metric-lbl">Lits</span>
+                </div>
+            </div>`;
+    }
+
+    if (!litsHtml && !toHtml) return; // rien à afficher
+
+    const frameColor = anneeCap === '2026' ? '#363795' : '#7f8c8d';
+    const headerEl   = document.getElementById('headerMetrics');
+    if (headerEl) {
+        headerEl.innerHTML = `
+            <div style="display:flex; flex-direction:column; border:1px solid ${frameColor};
+                        border-radius:8px; background:#fff; padding:8px; margin-right:15px;
+                        box-shadow:0 2px 5px rgba(0,0,0,0.05);">
+                <div style="font-size:1.1em; font-weight:800; color:${frameColor}; text-align:center;
+                            margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:4px; letter-spacing:1px;">
+                    ${anneeCap}
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    ${litsHtml}${toHtml}
+                </div>
+            </div>`;
+    }
+}
+
+// ── Rendu graphique Maternité ─────────────────────────────────────────────
+function _renderMaterniteChart() {
+    const entite = document.getElementById('entite')?.value || '';
+    const annee  = document.getElementById('annee')?.value  || '';
+    const mois   = document.getElementById('mois')?.value   || '';
+    const trim   = document.getElementById('trimestre')?.value || '';
+
+    const monthOrder   = ["JAN","FEV","MAR","AVR","MAI","JUIN","JUIL","AOU","SEP","OCT","NOV","DEC"];
+    const isComparatif = !annee;
+    const anneeCible   = annee || new Date().getFullYear().toString();
+
+    let labels = monthOrder;
+    if (mois) labels = [mois];
+    else if (trim && window.quarters) labels = window.quarters[trim] || monthOrder;
+
+    const dateOk = r => {
+        if (mois) return r[1] === mois;
+        if (trim && window.quarters) return window.quarters[trim]?.includes(r[1]);
+        return true;
+    };
+
+    const ctx = document.getElementById('kpiChart').getContext('2d');
+    const gradViolet = ctx.createLinearGradient(0, 0, 0, 400);
+    gradViolet.addColorStop(0, '#6366f1'); gradViolet.addColorStop(1, '#a78bfa');
+    const gradPink = ctx.createLinearGradient(0, 0, 0, 400);
+    gradPink.addColorStop(0, '#ec4899'); gradPink.addColorStop(1, '#f9a8d4');
+    const gradRed = ctx.createLinearGradient(0, 0, 0, 400);
+    gradRed.addColorStop(0, '#f43f5e'); gradRed.addColorStop(1, '#fda4af');
+
+    // ── VUE NUITÉES — pas de drill au clic ───────────────────
+    if (window._materniteView === 'NUITEES') {
+        const yearsToShow = isComparatif ? ['2025', '2026'] : [anneeCible];
+        const datasets = yearsToShow.map(yr => {
+            const agg = {};
+            labels.forEach(m => agg[m] = 0);
+            normalizedData.filter(r =>
+                r[2] === 'Maternité' && r[3] === 'Nombre de nuitées' &&
+                (!entite || r[0] === entite) && r[6].toString() === yr && dateOk(r)
+            ).forEach(r => { if (agg[r[1]] !== undefined) agg[r[1]] += parseFloat(r[5]) || 0; });
+            return {
+                label: isComparatif ? yr : 'Nuitées',
+                data: labels.map(m => agg[m]),
+                backgroundColor: (isComparatif && yr === '2025') ? '#e2e8f0' : gradViolet,
+                borderRadius: 10, borderSkipped: false,
+                barPercentage: 0.55, categoryPercentage: 0.75
+            };
+        });
+
+        // renderChart standard mais onClick bloqué via flag
+        window._materniteActive = true;
+        window.renderChart(
+            labels, datasets, false, null,
+            'Nuitées Maternité ' + (isComparatif ? '2025 vs 2026' : anneeCible),
+            isComparatif
+        );
+
+    // ── VUE ACTES — barre = total, clic = détail 2 éléments ──────────────
+    } else {
+        const aggC = {}, aggA = {};
+        labels.forEach(m => { aggC[m] = 0; aggA[m] = 0; });
+
+        const _normEl = s => s.toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+        normalizedData.filter(r =>
+            r[2] === 'Maternité' && r[3] === "Nombre d'actes" &&
+            (!entite || r[0] === entite) &&
+            (!annee  || r[6].toString() === anneeCible) &&
+            dateOk(r)
+        ).forEach(r => {
+            const el = _normEl(r[4]);
+            const v  = parseFloat(r[5]) || 0;
+            if (el.includes('CESAR')        && aggC[r[1]] !== undefined) aggC[r[1]] += v;
+            if (el.includes('ACCOUCHEMENT') && aggA[r[1]] !== undefined) aggA[r[1]] += v;
+        });
+
+        const totalData = labels.map(m => aggC[m] + aggA[m]);
+
+        window._materniteActive = true;
+        window._materniteActesDetail = { aggC, aggA }; // stocké pour le drill
+
+        window.renderChart(
+            labels,
+            [{ label: 'Total Actes', data: totalData,
+               backgroundColor: gradPink, borderRadius: 10, borderSkipped: false,
+               barPercentage: 0.6, categoryPercentage: 0.75 }],
+            false, null,
+            'Actes Maternité ' + anneeCible,
+            false
+        );
+    }
+}
+
+// Hook sur drawCharts
+(function() {
+    const _orig = window.drawCharts;
+    window.drawCharts = function() {
+        _ensureMaterniteButtons();
+        window._materniteActive = false;
+
+        if (_isMaterniteActive()) {
+            _orig.apply(this, arguments);       // focus panel + KPIs normaux
+            _renderMaterniteHeader();            // CORRECTION 1 : Lits + T.O.
+            _showMaterniteButtons(true);
+            _updateMatBtnStyles();
+            _renderMaterniteChart();             // graphique Maternité
+        } else {
+            _showMaterniteButtons(false);
+            _orig.apply(this, arguments);
+        }
+    };
+})();
+
+// ============================================================
+// 6. OVERRIDE openHistoryModal — Style moderne (inchangé)
 // ============================================================
 (function() {
     const origOpenHistory = window.openHistoryModal;
 
     window.openHistoryModal = function(type, entite, keyName, elementFilter) {
-        // Appeler l'original pour la logique de données
         if (origOpenHistory) origOpenHistory(type, entite, keyName, elementFilter);
-        
-        // Puis re-styliser le graphique après un court délai
+
         setTimeout(function() {
             if (!window.historyChartInstance) return;
-            
             const chart = window.historyChartInstance;
-            
-            // Moderniser les datasets
+
             chart.data.datasets.forEach(function(ds) {
                 if (ds.label && ds.label.includes('2026')) {
-                    ds.borderColor = '#6366f1';
-                    ds.backgroundColor = 'rgba(99, 102, 241, 0.08)';
-                    ds.borderWidth = 3;
-                    ds.pointBackgroundColor = '#6366f1';
-                    ds.pointBorderColor = '#fff';
-                    ds.pointBorderWidth = 2;
-                    ds.pointRadius = 5;
-                    ds.pointHoverRadius = 8;
-                    ds.tension = 0.4;
-                    ds.fill = true;
+                    ds.borderColor = '#6366f1'; ds.backgroundColor = 'rgba(99,102,241,0.08)';
+                    ds.borderWidth = 3; ds.pointBackgroundColor = '#6366f1';
+                    ds.pointBorderColor = '#fff'; ds.pointBorderWidth = 2;
+                    ds.pointRadius = 5; ds.pointHoverRadius = 8;
+                    ds.tension = 0.4; ds.fill = true;
                 } else if (ds.label && ds.label.includes('2025')) {
-                    ds.borderColor = '#cbd5e1';
-                    ds.backgroundColor = 'transparent';
-                    ds.borderWidth = 2;
-                    ds.borderDash = [6, 4];
-                    ds.pointBackgroundColor = '#94a3b8';
-                    ds.pointBorderColor = '#fff';
-                    ds.pointBorderWidth = 2;
-                    ds.pointRadius = 4;
-                    ds.pointHoverRadius = 7;
-                    ds.tension = 0.4;
-                    ds.fill = false;
+                    ds.borderColor = '#cbd5e1'; ds.backgroundColor = 'transparent';
+                    ds.borderWidth = 2; ds.borderDash = [6, 4];
+                    ds.pointBackgroundColor = '#94a3b8'; ds.pointBorderColor = '#fff';
+                    ds.pointBorderWidth = 2; ds.pointRadius = 4; ds.pointHoverRadius = 7;
+                    ds.tension = 0.4; ds.fill = false;
                 }
             });
 
-            // Moderniser les options
             chart.options.scales.y.display = false;
             chart.options.scales.x.grid = { display: false };
             chart.options.scales.x.border = { display: false };
             chart.options.scales.x.ticks = {
                 color: '#94a3b8',
-                font: { size: 11, weight: '700', family: "'Plus Jakarta Sans', sans-serif" },
+                font: { size: 12, weight: '700', family: "'Plus Jakarta Sans', sans-serif" },
                 padding: 8
             };
             chart.options.layout = { padding: { top: 30, bottom: 5 } };
-            
-            // Data labels — ALWAYS show all values
+
             chart.options.plugins.datalabels = {
-                display: function(ctx) {
-                    var v = ctx.dataset.data[ctx.dataIndex];
-                    return v && parseFloat(v) > 0;
-                },
-                color: function(ctx) {
-                    return ctx.dataset.label && ctx.dataset.label.includes('2026') ? '#4f46e5' : '#94a3b8';
-                },
+                display: ctx => { const v = ctx.dataset.data[ctx.dataIndex]; return v && parseFloat(v) > 0; },
+                color: ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? '#4f46e5' : '#94a3b8',
                 font: { weight: '800', size: 12, family: "'Plus Jakarta Sans', sans-serif" },
-                anchor: function(ctx) {
-                    return ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'end' : 'start';
-                },
-                align: function(ctx) {
-                    return ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'top' : 'bottom';
-                },
+                anchor: ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'end' : 'start',
+                align:  ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'top' : 'bottom',
                 offset: 6,
-                formatter: function(v) {
+                formatter: v => {
                     if (!v || v === '0.0' || parseFloat(v) === 0) return '';
                     return parseFloat(v).toFixed(0) + (type === 'occupation' ? '%' : '');
                 },
-                backgroundColor: function(ctx) {
-                    if (ctx.dataset.label && ctx.dataset.label.includes('2026')) return 'rgba(99,102,241,0.1)';
-                    return 'transparent';
-                },
+                backgroundColor: ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'rgba(99,102,241,0.1)' : 'transparent',
                 borderRadius: 4,
                 padding: { top: 3, bottom: 3, left: 6, right: 6 }
             };
 
             chart.options.plugins.legend = {
-                display: true,
-                position: 'top',
-                align: 'end',
+                display: true, position: 'top', align: 'end',
                 labels: {
-                    usePointStyle: true,
-                    pointStyle: 'circle',
-                    padding: 20,
-                    color: '#64748b',
+                    usePointStyle: true, pointStyle: 'circle', padding: 20, color: '#64748b',
                     font: { size: 12, weight: '700', family: "'Plus Jakarta Sans', sans-serif" }
                 }
             };
-
-            chart.options.plugins.title = {
-                display: false
-            };
-
+            chart.options.plugins.title = { display: false };
             chart.options.animation = { duration: 600, easing: 'easeOutQuart' };
-
             chart.update();
         }, 300);
 
-        // Moderniser la modale elle-même
         setTimeout(function() {
-            var modal = document.getElementById('historyModal');
-            var content = modal ? modal.querySelector('.modal-content') : null;
+            const modal   = document.getElementById('historyModal');
+            const content = modal ? modal.querySelector('.modal-content') : null;
             if (content) {
                 content.style.borderRadius = '20px';
                 content.style.boxShadow = '0 25px 60px rgba(0,0,0,0.2)';
                 content.style.border = '1px solid #e8ecf4';
                 content.style.padding = '28px 32px';
             }
-            // Style du titre
-            var title = document.getElementById('modalTitle');
+            const title = document.getElementById('modalTitle');
             if (title) {
                 title.style.color = '#1e293b';
                 title.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
@@ -293,11 +752,8 @@ window.renderChart = function(labels, datasets, isStacked, groupByAxis, chartTit
                 title.style.borderBottom = '2px solid #f0f2f8';
                 title.style.paddingBottom = '12px';
             }
-            // Style du subtitle
-            var sub = document.getElementById('modalSubtitle');
-            if (sub) {
-                sub.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
-            }
+            const sub = document.getElementById('modalSubtitle');
+            if (sub) sub.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
         }, 100);
     };
 })();
