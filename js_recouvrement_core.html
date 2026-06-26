@@ -35,7 +35,7 @@ let nonSoldesMode = 'REEL'; // 'REEL', 'AVOIR', 'TRANSFERT_N1', 'TRANSFERT_N2'
 const REC_MS_DAY = 1000 * 60 * 60 * 24;
 const REC_COLORS = ['#363795', '#e67e22', '#2ecc71', '#9b59b6', '#34495e', '#f1c40f', '#e74c3c'];
 const REC_MONTHS = ["JAN", "FEV", "MAR", "AVR", "MAI", "JUIN", "JUIL", "AOU", "SEP", "OCT", "NOV", "DEC"];
-const REC_ENTITY_ORDER = ['HIIN', 'CSS', 'CIOB', 'CIMO', 'HPB'];
+const REC_ENTITY_ORDER = ['HIIN', 'CSS', 'CIOB', 'CIMO', 'HPB', 'CIK'];
 
 // --- CHARGEMENT ---
 document.addEventListener('DOMContentLoaded', () => { loadRecouvData(); });
@@ -942,6 +942,7 @@ function processRecouvFile(file) {
         else if (n.includes("CIOB") || n.includes("BENGUERIR")) detectedEntity = "CIOB";
         else if (n.includes("CIMO") || n.includes("ESSAOUIRA")) detectedEntity = "CIMO";
         else if (n.includes("HPB") || n.includes("BENI") || n.includes("MELLAL")) detectedEntity = "HPB";
+        else if (n.includes("CIK") || n.includes("KHOURIBGA")) detectedEntity = "CIK";
 
         // 2. DÉTECTION INTELLIGENTE DU TYPE
         let targetMode = ""; 

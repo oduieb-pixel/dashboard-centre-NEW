@@ -7,7 +7,7 @@
 /* ============================================================ */
 /* 1. ENTITY ORDER                                               */
 /* ============================================================ */
-window.ENTITY_ORDER_PREF = ["HIIN", "CSS", "CIOB", "CIMO", "HPB"];
+window.ENTITY_ORDER_PREF = ["HIIN", "CSS", "CIOB", "CIMO", "HPB", "CIK"];
 
 /* ============================================================ */
 /* 2. LAZY LOADING - only load when tab is opened                */
@@ -90,6 +90,7 @@ window.processSingleHonoFileSmart = function(file, sessionClearedKeys) {
     else if (n.includes("CIOB") || n.includes("BENGUERIR") || n.includes("BENGURIR")) detectedEntity = "CIOB";
     else if (n.includes("CIMO") || n.includes("ESSAOUIRA")) detectedEntity = "CIMO";
     else if (n.includes("HPB") || n.includes("BENI") || n.includes("MELLAL")) detectedEntity = "HPB";
+    else if (n.includes("CIK") || n.includes("KHOURIBGA")) detectedEntity = "CIK";
     // Fallback old
     else if (n.includes("HIA") && !n.includes("CIOA")) detectedEntity = "HIA";
     else if (n.includes("CIOA")) detectedEntity = "CIOA";

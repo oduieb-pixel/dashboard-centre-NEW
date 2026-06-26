@@ -16,7 +16,7 @@ const SPREADSHEET_ID_2026 = "1PjRrUHvC7daE9McMczrMnkEy_iEcqO3UCCPfgPgGdRo"; // N
 const REC_EXP_SOURCE_ID = "1o7POmu556ISmLvDgooBbfdXCxDjod1NYKT6BfR8hxMc";
 const RH_SPREADSHEET_ID = "16PgnPwy3KBH-Iwylos7v-xFECINk3z0sCWNwQ1hvg60";
 
-const ENTITES_REGION = ["CSS", "CIOB", "CIMO", "HIIN", "HPB"];
+const ENTITES_REGION = ["CSS", "CIOB", "CIMO", "HIIN", "HPB", "CIK"];
 
 // =======================================================================
 // 1. CONFIGURATION ET MENU
@@ -528,7 +528,8 @@ function getSuiviRetoursData() {
     "CSS":   { patient: "B", reponse: "C", facture: "D", organisme: "G", montant: "J", observation: "K", motif: "L" },
     "CIOB":  { patient: "B", reponse: "C", facture: "D", organisme: "G", montant: "J", observation: "K", motif: "L" },
     "CIMO":  { patient: "B", reponse: "C", facture: "D", organisme: "G", montant: "J", observation: "K", motif: "L" },
-    "HPB":   { patient: "B", reponse: "C", facture: "D", organisme: "G", montant: "J", observation: "K", motif: "L" }
+    "HPB":   { patient: "B", reponse: "C", facture: "D", organisme: "G", montant: "J", observation: "K", motif: "L" },
+    "CIK":   { patient: "B", reponse: "C", facture: "D", organisme: "G", montant: "J", observation: "K", motif: "L" }
   };
   
   // ⚠️ REMPLACEZ les IDs par les vrais IDs de vos fichiers de retours
@@ -537,7 +538,8 @@ function getSuiviRetoursData() {
     { entite: "CSS",   id: "VOTRE_ID_RETOURS_CSS", sheetName: "CSS" },
     { entite: "CIOB",  id: "VOTRE_ID_RETOURS_CIOB", sheetName: "CIOB" },
     { entite: "CIMO",  id: "VOTRE_ID_RETOURS_CIMO", sheetName: "CIMO" },
-    { entite: "HPB",   id: "VOTRE_ID_RETOURS_HPB", sheetName: "HPB" }
+    { entite: "HPB",   id: "VOTRE_ID_RETOURS_HPB", sheetName: "HPB" },
+    { entite: "CIK",   id: "VOTRE_ID_RETOURS_CIK", sheetName: "CIK" }
   ];
   
   let compiledData = [];
@@ -843,13 +845,13 @@ function consoliderHonoraires() {
     }
   }
 
-  // Stocke dans un onglet unique
+  // Stocke dans un onglet unique : Optimisation pour éviter la limite des 10M de cellules
   let consolideSheet = ss.getSheetByName("HONO_CONSOLIDE");
-  if (!consolideSheet) {
-    consolideSheet = ss.insertSheet("HONO_CONSOLIDE");
+  if (consolideSheet) {
+    ss.deleteSheet(consolideSheet); // On supprime l'ancien onglet pour vider la mémoire
   }
-  consolideSheet.clear();
-  
+  consolideSheet = ss.insertSheet("HONO_CONSOLIDE"); // On crée un onglet neuf et propre
+
   if (aggregData.length > 1) {
     consolideSheet.getRange(1, 1, aggregData.length, aggregData[0].length).setValues(aggregData);
   }
@@ -859,22 +861,68 @@ function consoliderHonoraires() {
   return "Succès : " + (aggregData.length - 1) + " lignes consolidées.";
 }
 
-// 2. On remplace l'ancienne fonction très lente par celle-ci qui lit juste le fichier fusionné
+// 2. Fonction qui lit les données DIRECTEMENT depuis les fichiers sans les stocker dans le tableur principal
 function getHonorairesData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("HONO_CONSOLIDE");
+  const indexSheet = ss.getSheetByName("DB_INDEX");
   
-  let lastUpdate = "--/--/----";
-  try {
-    lastUpdate = PropertiesService.getScriptProperties().getProperty('LAST_HONO_CONSOLIDE') || lastUpdate;
-  } catch(e) {}
-
-  if (!sheet || sheet.getLastRow() < 2) {
-    return { data: [], lastUpdate: "Veuillez lancer la consolidation depuis le menu" };
+  if (!indexSheet || indexSheet.getLastRow() < 2) {
+    return { data: [], lastUpdate: "Aucune donnée disponible" };
   }
 
-  const data = sheet.getDataRange().getValues();
-  return { data: data, lastUpdate: lastUpdate };
+  const sources = indexSheet.getRange(2, 1, indexSheet.getLastRow() - 1, 5).getValues();
+  let aggregData = [];
+
+  const dummyHeader = [
+    "Entité", "J_Sortie", "M_Sortie", "A_Sortie", "Famille", "Bénéficiaire", "Spécialité", "Solde",
+    "Type Paie", "Organisme", "Num PEC", "Dossier", "Réglé", "J_Paie", "M_Paie", "A_Paie",
+    "Type Paiement", "Montant Brut", "Montant Net", "Montant Retenu", "Patente", "J_Envoi", "M_Envoi", "A_Envoi",
+    "Type Organisme", "Eligible", "Mode Paie"
+  ];
+  aggregData.push(dummyHeader);
+
+  let latestUpdate = new Date(0);
+
+  // Aspire tous les fichiers à la volée (en mémoire)
+  for (let i = 0; i < sources.length; i++) {
+    const id = sources[i][2];
+    const updateDate = sources[i][4]; // Date de mise à jour dans DB_INDEX
+    
+    if (updateDate instanceof Date && updateDate > latestUpdate) {
+        latestUpdate = updateDate;
+    }
+
+    try {
+      const extSS = SpreadsheetApp.openById(id);
+      const extSheet = extSS.getSheets()[0];
+      const lr = extSheet.getLastRow();
+      const lc = extSheet.getLastColumn();
+      
+      if (lr > 1 && lc > 0) {
+        const vals = extSheet.getRange(2, 1, lr - 1, lc).getValues();
+        
+        // Nettoyage et formatage à la volée
+        const cleanVals = vals.filter(row => row[0] !== null && row[0] !== "").map(row => {
+          let newRow = row.slice(0, 27);
+          while (newRow.length < 27) newRow.push("");
+          return newRow;
+        });
+        
+        aggregData = aggregData.concat(cleanVals);
+      }
+    } catch (e) {
+      console.error("Erreur lecture ID " + id + " : " + e.message);
+    }
+  }
+
+  let lastUpdateStr = "--/--/----";
+  if (latestUpdate.getTime() > 0) {
+      // Formate la date de la dernière mise à jour
+      lastUpdateStr = latestUpdate.toLocaleDateString('fr-FR') + ' à ' + latestUpdate.toLocaleTimeString('fr-FR', {hour: '2-digit', minute:'2-digit'});
+  }
+
+  // Renvoie directement les données au tableau de bord (Rien n'est collé dans Google Sheets)
+  return { data: aggregData, lastUpdate: "Temps réel (" + lastUpdateStr + ")" };
 }
 // =======================================================================
 // 9. MODULE DOSSIERS NON SOLDÉS

@@ -4,7 +4,7 @@
 /*  Full chart rewrite + thousands separators + entity fix        */
 /* ============================================================ */
 
-window.DEP_ENTITY_ORDER = ["HIIN", "CSS", "CIOB", "CIMO", "HPB"];
+window.DEP_ENTITY_ORDER = ["HIIN", "CSS", "CIOB", "CIMO", "HPB", "CIK"];
 
 /* ============================================================ */
 /* GLOBAL: formatMoney with thousands separator                  */
@@ -26,6 +26,7 @@ window.processSingleFile = function(file) {
     else if (n.includes("CIOB") || n.includes("BENGUERIR") || n.includes("BENGURIR")) detectedEntity = "CIOB";
     else if (n.includes("CIMO") || n.includes("ESSAOUIRA")) detectedEntity = "CIMO";
     else if (n.includes("HPB") || n.includes("BENI") || n.includes("MELLAL")) detectedEntity = "HPB";
+    else if (n.includes("CIK") || n.includes("KHOURIBGA")) detectedEntity = "CIK";
     else if (n.includes("HIA")) detectedEntity = "HIA";
     else if (n.includes("CIOA")) detectedEntity = "CIOA";
     else if (n.includes("PIL")) detectedEntity = "PIL";
