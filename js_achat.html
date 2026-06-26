@@ -1,17 +1,16 @@
 <script>
 /**
- * MODULE ACHAT v18
- * - Séparateurs milliers partout
- * - YTD par défaut (Tab 1+2+3)
- * - "Objectif" au lieu de "Budget" sur Tab 2+3
- * - Top 10 / Tous fournisseurs
- * - KPIs opé en premier Tab 2, financiers en bas + Variation 2026/2025
- * - Simulateur enrichi + UX premium
+ * MODULE ACHAT v18 - MODIFIÉ
+ * - Onglet unique APP affiché.
+ * - Milliers et millions espacés clairement.
+ * - Trimestres à sélection multiple et bouton de réinitialisation.
+ * - Prise en charge de l'année 2025 comme année de base.
  */
 
 var globalAchatData=[];var globalAchatData2025=[];var globalAchatBudget=[];var globalBudgetApp=[];var globalConsoN1=[];var globalDataSage=[];var globalCodeArticle=[];
 var currentAchatFiltered=[];var currentAchat2025Filtered=[];var currentBudgetFiltered=[];var currentSageFiltered=[];
-var achatActiveTab='sage';var appChartMode='famille';var appTop10Mode='top10';var currentModalRows=[];var currentModalTitle="detail";
+var achatActiveTab='app'; // Default tab changed to 'app'
+var appChartMode='famille';var appTop10Mode='top10';var currentModalRows=[];var currentModalTitle="detail";
 
 var ACHAT_MONTHS=["JAN","FEV","MAR","AVR","MAI","JUIN","JUIL","AOU","SEP","OCT","NOV","DEC"];
 var ACHAT_MONTHS_FR=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
@@ -38,9 +37,18 @@ var SITE_NORMALIZE={'CSS':'CCS','CCS':'CCS','CCSS':'CCS','CIMOG':'CIMO','CIMO':'
 function achSet(id,t){var e=document.getElementById(id);if(e)e.textContent=t;}
 function achHTML(id,h){var e=document.getElementById(id);if(e)e.innerHTML=h;}
 function pn(v){if(v==null||v==='')return 0;if(typeof v==='number')return isNaN(v)?0:v;var s=String(v).trim().replace(/\s/g,'').replace(',','.');var n=parseFloat(s);return isNaN(n)?0:n;}
-function fmt(v){if(v==null||isNaN(v))return"0";return Math.round(v).toLocaleString('fr-FR');}
-function fmtK(v){if(v==null||isNaN(v))return"0 K";return Math.round(v/1000).toLocaleString('fr-FR')+" K";}
-function fmtDec(v,d){if(v==null||isNaN(v))return"0";return v.toLocaleString('fr-FR',{minimumFractionDigits:d||0,maximumFractionDigits:d||0});}
+
+// FORMATAGE DES CHIFFRES: Ajout explicite des espaces entre milliers et millions
+function formatStr(v) { return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " "); }
+function fmt(v){if(v==null||isNaN(v))return"0";return formatStr(Math.round(v));}
+function fmtK(v){if(v==null||isNaN(v))return"0 K";return formatStr(Math.round(v/1000))+" K";}
+function fmtDec(v,d){
+    if(v==null||isNaN(v))return"0";
+    var parts = Number(v).toFixed(d||0).split('.');
+    parts[0] = formatStr(parts[0]);
+    return parts.join(',');
+}
+
 function pd(dv){if(!dv)return null;var d=null;if(dv instanceof Date)d=dv;else if(typeof dv==='string'){var m=dv.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);if(m){var y=parseInt(m[3]);if(y<100)y+=2000;d=new Date(y,parseInt(m[2])-1,parseInt(m[1]));}}else if(typeof dv==='number')d=new Date(dv);if(!d||isNaN(d.getTime()))return null;return d;}
 function em(dv){var d=pd(dv);if(!d)return null;return{mois:ACHAT_MONTHS[d.getMonth()],annee:d.getFullYear()};}
 function ns(s){if(!s)return"";var u=String(s).trim().toUpperCase();return SITE_NORMALIZE[u]||u;}
@@ -70,9 +78,14 @@ function renderAchatDashboard(resp){
     var A=new Date().getFullYear();
     var seen=new Set(),cl=[];(resp.data||[]).forEach(function(r){var id=String(r[COL.idLigneCmd]||"").trim();if(!id){cl.push(r);return;}if(seen.has(id))return;seen.add(id);cl.push(r);});
     globalAchatData=cl.map(function(r){return nRow(r,A);}).filter(function(r){return r.demande;});
+    
     var s25=new Set(),c25=[];(resp.data2025||[]).forEach(function(r){var id=String(r[COL.idLigneCmd]||"").trim();if(!id){c25.push(r);return;}if(s25.has(id))return;s25.add(id);c25.push(r);});
     globalAchatData2025=c25.map(function(r){return nRow(r,2025);}).filter(function(r){return r.demande&&r.isValide&&r.annee===2025;});
-    console.log("📋 2026: "+globalAchatData.length+" | 2025: "+globalAchatData2025.length);
+    
+    // FUSION DES ANNEES : Permet de requêter 2025 dans les filtres
+    globalAchatData = globalAchatData.concat(globalAchatData2025);
+    
+    console.log("📋 2026/2025: "+globalAchatData.length);
 
     globalAchatBudget=(resp.budget||[]).map(function(r){var ms=String(r[COL_BUD.mois]||"").trim();var mi=ACHAT_MONTHS_FR.findIndex(function(m){return m.toLowerCase()===ms.toLowerCase();});return{site:ns(r[COL_BUD.sites]),compte:String(r[COL_BUD.compte]||"").trim(),description:String(r[COL_BUD.description]||"").trim(),libelle:String(r[COL_BUD.libelle]||"").trim(),mois:mi>=0?ACHAT_MONTHS[mi]:null,montant:pn(r[COL_BUD.montant])*1000,annee:A,direction:String(r[COL_BUD.direction]||"").trim(),postePC:String(r[COL_BUD.postesPC]||"").trim()};}).filter(function(b){return b.compte&&!/chiffre\s*d['\u2019]?\s*affaires?/i.test(b.direction);});
 
@@ -91,11 +104,10 @@ function renderAchatDashboard(resp){
     globalAchatData.forEach(function(d){if(d.refComptable){var cs=srm[d.refComptable];if(cs){d.compteGSage=cs;d.compteFinal=cs;}}});
 
     globalCodeArticle=(resp.codeArticle||[]).map(function(r){return{designation:String(r[COL_ART.designation]||"").trim(),famille:String(r[COL_ART.famille]||"").trim(),section:String(r[COL_ART.section]||"").trim(),code:String(r[COL_ART.code]||"").trim()};}).filter(function(a){return a.code;});
-    console.log("📦 Articles: "+globalCodeArticle.length);
     populateAchatFilters();updateAchatView();
 }
 
-// ===== FILTRES (YTD par défaut sur Tab 1+2+3) =====
+// ===== FILTRES =====
 function populateAchatFilters(){
     var sSet=new Set();
     globalAchatBudget.forEach(function(b){sSet.add(b.site);});globalBudgetApp.forEach(function(b){sSet.add(b.site);});globalAchatData.forEach(function(d){sSet.add(d.site);});globalDataSage.forEach(function(s){sSet.add(s.site);});
@@ -106,8 +118,14 @@ function populateAchatFilters(){
     var selFam=document.getElementById('achatFilterFamille');
     if(selFam){selFam.innerHTML='<option value="">TOUT</option>';[...familles].sort().forEach(function(f){selFam.add(new Option(f,f));});}
     updateAppSectionOptions();updateAppFournisseurOptions();updateAchatMonthOptions();
-    ['achatFilterAnnee','calcFilterAnnee'].forEach(function(id){var s=document.getElementById(id);if(!s)return;s.innerHTML='';[new Date().getFullYear()].forEach(function(a){s.add(new Option(a,a));});});
-    // Mois calc + filtres communs : YTD par défaut
+    
+    // ANNEE FILTER (INCLUT 2025)
+    ['achatFilterAnnee','calcFilterAnnee'].forEach(function(id){
+        var s=document.getElementById(id);if(!s)return;
+        s.innerHTML='';
+        [new Date().getFullYear(), 2025].forEach(function(a){s.add(new Option(a,a));});
+    });
+
     ['achatFilterMois','calcFilterMois'].forEach(function(id){
         var s=document.getElementById(id);if(!s)return;
         s.innerHTML='<option value="">YTD (Jan → mois en cours)</option>';
@@ -116,21 +134,69 @@ function populateAchatFilters(){
 }
 function updateAppSectionOptions(){var fam=(document.getElementById('achatFilterFamille')||{}).value||"";var sel=document.getElementById('achatFilterSection');if(!sel)return;var old=sel.value;sel.innerHTML='<option value="">TOUT</option>';var secs=new Set();globalAchatData.forEach(function(d){if(fam&&d.famille!==fam)return;if(d.section&&d.section!=='Non défini')secs.add(d.section);});[...secs].sort().forEach(function(s){sel.add(new Option(s,s));});if(old&&[...sel.options].some(function(o){return o.value===old;}))sel.value=old;}
 function updateAppFournisseurOptions(){var fam=(document.getElementById('achatFilterFamille')||{}).value||"";var sec=(document.getElementById('achatFilterSection')||{}).value||"";var sel=document.getElementById('achatFilterFournisseur');if(!sel)return;var old=sel.value;sel.innerHTML='<option value="">TOUT</option>';var frs=new Set();globalAchatData.forEach(function(d){if(fam&&d.famille!==fam)return;if(sec&&d.section!==sec)return;if(d.fournisseur&&d.fournisseur!=='Non défini')frs.add(d.fournisseur);});[...frs].sort().forEach(function(f){sel.add(new Option(f,f));});if(old&&[...sel.options].some(function(o){return o.value===old;}))sel.value=old;}
-function updateAchatMonthOptions(){var trim=(document.getElementById('achatFilterTrim')||{}).value||"";var sel=document.getElementById('achatFilterMois');if(!sel)return;var old=sel.value;sel.innerHTML='<option value="">YTD (Jan → mois en cours)</option>';var ml=trim?ACHAT_QUARTERS[trim]:ACHAT_MONTHS;if(ml)ml.forEach(function(m,i){sel.add(new Option(m,m));});if(old&&[...sel.options].some(function(o){return o.value===old;}))sel.value=old;}
 
-function getResolvedMonths(moisVal,trimVal){
-    if(moisVal)return[moisVal];
-    if(trimVal&&ACHAT_QUARTERS[trimVal])return ACHAT_QUARTERS[trimVal];
+// MULTIPLE TRIMESTRES
+function updateAchatMonthOptions(){
+    var trimSel = document.getElementById('achatFilterTrim');
+    var trims = trimSel ? Array.from(trimSel.selectedOptions).map(function(o){return o.value;}).filter(Boolean) : [];
+    var sel = document.getElementById('achatFilterMois'); if(!sel) return;
+    var old = sel.value;
+    sel.innerHTML = '<option value="">YTD (Jan → mois en cours)</option>';
+    
+    var ml = [];
+    if(trims.length > 0) {
+        trims.forEach(function(t){ if(ACHAT_QUARTERS[t]) ml = ml.concat(ACHAT_QUARTERS[t]); });
+    } else {
+        ml = ACHAT_MONTHS;
+    }
+    
+    ml.forEach(function(m){
+        var mIdx = ACHAT_MONTHS.indexOf(m);
+        if(mIdx >= 0) sel.add(new Option(ACHAT_MONTHS_FR[mIdx], m));
+    });
+    if(old && [...sel.options].some(function(o){return o.value===old;})) sel.value=old;
+}
+
+function getResolvedMonths(moisVal, trims){
+    if(moisVal) return [moisVal];
+    if(trims && trims.length > 0) {
+        var r=[];
+        trims.forEach(function(t){ if(ACHAT_QUARTERS[t]) r = r.concat(ACHAT_QUARTERS[t]); });
+        return r;
+    }
     return getYTDMonths();
 }
+
 function getCommonFilters(){
     var site=(document.getElementById('achatFilterSite')||{}).value||"";
     var annee=(document.getElementById('achatFilterAnnee')||{}).value||"";
-    var trim=(document.getElementById('achatFilterTrim')||{}).value||"";
+    var trimSel = document.getElementById('achatFilterTrim');
+    var trims = trimSel ? Array.from(trimSel.selectedOptions).map(function(o){return o.value;}).filter(Boolean) : [];
     var mois=(document.getElementById('achatFilterMois')||{}).value||"";
-    return{site:site,annee:annee,trim:trim,mois:mois,moisList:getResolvedMonths(mois,trim)};
+    return{site:site,annee:annee,trims:trims,mois:mois,moisList:getResolvedMonths(mois,trims)};
 }
 function getAppFilters(){var f=getCommonFilters();f.famille=(document.getElementById('achatFilterFamille')||{}).value||"";f.section=(document.getElementById('achatFilterSection')||{}).value||"";f.fournisseur=(document.getElementById('achatFilterFournisseur')||{}).value||"";return f;}
+
+// NOUVELLE FONCTION: Réinitialiser les filtres
+function resetAchatFilters() {
+    var selects = ['achatFilterSite', 'achatFilterMois', 'achatFilterFamille', 'achatFilterSection', 'achatFilterFournisseur'];
+    selects.forEach(function(id){
+        var el = document.getElementById(id);
+        if(el) el.value = "";
+    });
+    var trimSel = document.getElementById('achatFilterTrim');
+    if(trimSel) {
+        Array.from(trimSel.options).forEach(function(o){ o.selected = false; });
+    }
+    var anneeEl = document.getElementById('achatFilterAnnee');
+    if(anneeEl) anneeEl.value = new Date().getFullYear();
+    
+    updateAppSectionOptions();
+    updateAppFournisseurOptions();
+    updateAchatMonthOptions();
+    updateAchatView();
+}
+
 
 function filterBySTM(arr,f,sK,aK,mK){
     return arr.filter(function(d){if(f.site&&d[sK]!==f.site)return false;if(aK&&f.annee&&String(d[aK])!==String(f.annee))return false;if(d[mK]&&f.moisList.indexOf(d[mK])<0)return false;return true;});
@@ -144,8 +210,8 @@ function filterBudgetForApp(){var f=getAppFilters();return globalBudgetApp.filte
 
 function setAchatTab(tab){
     achatActiveTab=tab;
-    ['sage','app','calc'].forEach(function(t){var el=document.getElementById('achatContent'+t.charAt(0).toUpperCase()+t.slice(1));if(el)el.style.display=(t===tab)?'':'none';var btn=document.getElementById('btnTab'+t.charAt(0).toUpperCase()+t.slice(1));if(btn){btn.style.background=(t===tab)?'#1a202c':'#fff';btn.style.color=(t===tab)?'#fff':'#4a5568';btn.style.border=(t===tab)?'none':'1px solid #e2e8f0';btn.style.boxShadow=(t===tab)?'0 4px 6px rgba(0,0,0,.1)':'none';}});
-    var af=document.getElementById('appExtraFilters');if(af)af.style.display=(tab==='app')?'':'none';
+    ['sage','app','calc'].forEach(function(t){var el=document.getElementById('achatContent'+t.charAt(0).toUpperCase()+t.slice(1));if(el)el.style.display=(t===tab)?'block':'none';var btn=document.getElementById('btnTab'+t.charAt(0).toUpperCase()+t.slice(1));if(btn){btn.style.background=(t===tab)?'#1a202c':'#fff';btn.style.color=(t===tab)?'#fff':'#4a5568';btn.style.border=(t===tab)?'none':'1px solid #e2e8f0';btn.style.boxShadow=(t===tab)?'0 4px 6px rgba(0,0,0,.1)':'none';}});
+    var af=document.getElementById('appExtraFilters');if(af)af.style.display=(tab==='app')?'block':'none';
     updateAchatView();
 }
 function updateAchatView(){
@@ -154,35 +220,6 @@ function updateAchatView(){
     if(achatActiveTab==='sage'){currentSageFiltered=filterSageData();currentBudgetFiltered=filterBudgetForSage();currentAchatFiltered=filterBySTM(globalAchatData,fc,'site','annee','mois');renderSageKPIs();renderSageChart();}
     else if(achatActiveTab==='app'){currentAchatFiltered=filterAppData();currentAchat2025Filtered=filterApp2025Data();currentBudgetFiltered=filterBudgetForApp();renderAppKPIs();renderAppChart();renderAppTop10();}
     else if(achatActiveTab==='calc'){runCalculator();}
-}
-
-// ===================================================================
-// TAB 1 : SAGE
-// ===================================================================
-function renderSageKPIs(){
-    var tB=currentBudgetFiltered.reduce(function(s,b){return s+b.montant;},0);
-    var tS=currentSageFiltered.reduce(function(s,r){return s+r.solde;},0);
-    var tE=currentAchatFiltered.filter(function(d){return d.isEngaged;}).reduce(function(s,d){return s+d.montantTTC;},0);
-    var nE=currentAchatFiltered.filter(function(d){return d.isEngaged;}).length;
-    var ecart=tB-tS-tE;var taux=tB>0?((tS+tE)/tB*100):0;
-    achSet('sageKpiBudget',fmt(tB)+' MAD');achSet('sageKpiConso',fmt(tS)+' MAD');
-    achSet('sageKpiConsoPct',(tB>0?fmtDec(tS/tB*100,1):0)+'% du budget');
-    achSet('sageKpiEngage',fmt(tE)+' MAD');achSet('sageKpiEngageNb',fmtDec(nE,0));
-    achSet('sageKpiEcart',fmt(ecart)+' MAD');achSet('sageKpiEcartPct',(tB>0?fmtDec(ecart/tB*100,1):0)+'% restant');
-    achSet('sageKpiTaux',fmtDec(taux,1)+' %');
-    var fill=document.getElementById('sageKpiTauxFill');if(fill){fill.style.width=Math.min(taux,100)+'%';fill.style.background=taux>100?CLR.rose:taux>85?CLR.engage:CLR.c2026;}
-    var ie=document.getElementById('sageInsight');if(ie)ie.innerHTML=insight(taux,tB,tS+tE);
-}
-
-function renderSageChart(){
-    var cToF=window.globalCompteToFamCode||{};var map={};
-    FAMILLES_ORDER_SAGE.forEach(function(c){map[c]={key:c+' '+FAMILLES_CIBLE[c],code:c,budget:0,consoSage:0,engage:0,conso2026:0,conso2025:0,comptes:new Set()};});
-    currentBudgetFiltered.forEach(function(b){var fc=cToF[b.compte];if(fc&&map[fc]){map[fc].budget+=b.montant;map[fc].comptes.add(b.compte);}});
-    currentSageFiltered.forEach(function(s){var fc=cToF[s.compte];if(fc&&map[fc]){map[fc].consoSage+=s.solde;map[fc].comptes.add(s.compte);}});
-    currentAchatFiltered.forEach(function(d){if(!d.isEngaged)return;var cpt=d.compteFinal||d.codeCompta;if(!cpt)return;var fc=cToF[cpt];if(fc&&map[fc])map[fc].engage+=d.montantTTC;});
-    filterBySTM(globalConsoN1,getCommonFilters(),'site',null,'mois').forEach(function(n){var fc=cToF[n.compte];if(fc&&map[fc])map[fc].conso2025+=n.montant;});
-    Object.values(map).forEach(function(r){r.conso2026=r.consoSage+r.engage;r.comptesArr=[...r.comptes];r.taux=r.budget>0?(r.conso2026/r.budget*100):0;});
-    renderChartGrid('sageChartContainer',FAMILLES_ORDER_SAGE.map(function(c){return map[c];}),'sage');
 }
 
 // ===================================================================
@@ -279,10 +316,10 @@ function renderHierarchicalChart(cid,fm){
 }
 
 // ===================================================================
-// CHART GRID (Tab 1 + Tab 2 vue section)
+// CHART GRID (Tab 2 vue section)
 // ===================================================================
 function renderChartGrid(cid,rows,src){
-    var cc=src==='sage'?CLR.purple:CLR.c2026;var cl=src==='sage'?'Conso 2026':'Conso 2026';
+    var cc=src==='sage'?CLR.purple:CLR.c2026;var cl=src==='sage'?'Conso 2026':'Conso ciblée';
     var lbl=src==='app'?'Objectif':'Budget';
     var h='<div style="display:flex;gap:8px;padding:8px 12px;border-bottom:2px solid '+CLR.border+';margin-bottom:8px;font-size:.7em;font-weight:700;color:'+CLR.slate+';text-transform:uppercase"><div style="flex:2">Libellé</div><div style="flex:1;text-align:right;color:'+CLR.budget+'">'+lbl+'</div><div style="flex:1;text-align:right;color:'+cc+'">2026</div><div style="flex:1;text-align:right;color:'+CLR.c2025+'">2025</div><div style="flex:2">Progression</div><div style="flex:.5;text-align:right">Taux</div></div>';
     if(!rows.length)h+='<div style="padding:40px;text-align:center;color:'+CLR.muted+'">Aucune donnée</div>';
@@ -348,11 +385,11 @@ function openChartModal(idx,src){
     var ev=row.conso2025>0?((t26-row.conso2025)/row.conso2025*100):null;
     var evC=ev==null?CLR.muted:(ev>0?CLR.rose:CLR.emerald);var evT=ev==null?'—':(ev>0?'+':'')+fmtDec(ev,1)+' %';
     var h='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">';
-    h+=kpi(lbl+' 2026',fmt(row.budget)+' MAD',CLR.budget,'');
-    h+=kpi('Conso 2026'+(eng>0?' + Engagé':''),fmt(c26)+' MAD'+(eng>0?' <span style="color:'+CLR.engage+';font-size:.85em">+ '+fmt(eng)+'</span>':''),CLR.c2026,(row.budget>0?fmtDec(c26/row.budget*100,1):0)+'%');
-    h+=kpi('Conso 2025',fmt(row.conso2025)+' MAD',CLR.c2025,'');
+    h+=kpi(lbl,fmt(row.budget)+' MAD',CLR.budget,'');
+    h+=kpi('Conso globale'+(eng>0?' + Engagé':''),fmt(c26)+' MAD'+(eng>0?' <span style="color:'+CLR.engage+';font-size:.85em">+ '+fmt(eng)+'</span>':''),CLR.c2026,(row.budget>0?fmtDec(c26/row.budget*100,1):0)+'%');
+    h+=kpi('Conso N-1',fmt(row.conso2025)+' MAD',CLR.c2025,'');
     h+='</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px">';
-    h+=kpi('Variation 2026/2025',evT,evC,ev!=null?fmt(t26-row.conso2025)+' MAD':'');
+    h+=kpi('Variation annuelle',evT,evC,ev!=null?fmt(t26-row.conso2025)+' MAD':'');
     h+=kpi('Écart '+lbl,fmt(ecart)+' MAD',ecart<0?CLR.rose:CLR.blue,'');
     h+='</div>';
     h+='<div style="background:#fff;border:1px solid '+CLR.border+';border-radius:10px;padding:16px;margin-bottom:18px"><div style="font-weight:800;color:'+CLR.ink+';font-size:.95em;margin-bottom:12px">Suivi mensuel</div><div style="height:250px;position:relative"><canvas id="modalMonthlyChart"></canvas></div></div>';
@@ -370,7 +407,7 @@ function rModalChart(row,src){
     var lb=[],bd=[],sd=[],nd=[];for(var i=0;i<12;i++){if(b[i]>0||d26[i]>0||d25[i]>0){lb.push(ACHAT_MONTHS[i]);bd.push(Math.round(b[i]/1000));sd.push(Math.round(d26[i]/1000));nd.push(Math.round(d25[i]/1000));}}
     if(!lb.length)return;if(window._mC)window._mC.destroy();
     var lbl=achatActiveTab==='app'?'Objectif':'Budget';
-    window._mC=new Chart(c.getContext('2d'),{type:'bar',data:{labels:lb,datasets:[{label:lbl,data:bd,backgroundColor:'rgba(26,32,44,.15)',borderColor:CLR.budget,borderWidth:1,borderRadius:4,order:3},{label:'2026',data:sd,backgroundColor:CLR.c2026,borderRadius:4,order:2},{label:'2025',data:nd,backgroundColor:CLR.c2025+'60',borderColor:CLR.c2025,borderWidth:1,borderRadius:4,order:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:10,font:{size:11,weight:'600'}}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+' : '+ctx.raw.toLocaleString('fr-FR')+' K MAD';}}}},scales:{y:{beginAtZero:true,ticks:{callback:function(v){return v.toLocaleString('fr-FR')+' K';},font:{size:10}},grid:{color:'#f0f0f0'}},x:{ticks:{font:{size:10,weight:'600'}},grid:{display:false}}}}});
+    window._mC=new Chart(c.getContext('2d'),{type:'bar',data:{labels:lb,datasets:[{label:lbl,data:bd,backgroundColor:'rgba(26,32,44,.15)',borderColor:CLR.budget,borderWidth:1,borderRadius:4,order:3},{label:'Année cible',data:sd,backgroundColor:CLR.c2026,borderRadius:4,order:2},{label:'Année N-1',data:nd,backgroundColor:CLR.c2025+'60',borderColor:CLR.c2025,borderWidth:1,borderRadius:4,order:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:10,font:{size:11,weight:'600'}}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+' : '+ctx.raw.toLocaleString('fr-FR')+' K MAD';}}}},scales:{y:{beginAtZero:true,ticks:{callback:function(v){return v.toLocaleString('fr-FR')+' K';},font:{size:10}},grid:{color:'#f0f0f0'}},x:{ticks:{font:{size:10,weight:'600'}},grid:{display:false}}}}});
 }
 
 function rTable(lines){
@@ -381,143 +418,30 @@ function rTable(lines){
 
 function openFournisseurModal(idx){
     var all=window._top10Data||[];if(idx<0||idx>=all.length)return;var f=all[idx];
-    achSet('modalTitle','🏢 '+f.nom);achSet('modalSubtitle','Détail 2026 + 2025');
+    achSet('modalTitle','🏢 '+f.nom);achSet('modalSubtitle','Détail');
     currentModalTitle='fourn_'+String(f.nom).replace(/[^a-z0-9]/gi,'_').substring(0,30);
     var l26=currentAchatFiltered.filter(function(d){return d.fournisseur===f.nom;});
     var l25=currentAchat2025Filtered.filter(function(d){return d.fournisseur===f.nom;});
     currentModalRows=l26;
     var ev=f.t25>0?((f.total-f.t25)/f.t25*100):null;var evT=ev==null?'—':(ev>0?'+':'')+fmtDec(ev,1)+' %';var evC=ev==null?CLR.muted:(ev>0?CLR.rose:CLR.emerald);
     var h='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">';
-    h+=kpi('Conso 2026'+(f.engage>0?' + Engagé':''),fmt(f.valide)+' MAD'+(f.engage>0?' <span style="color:'+CLR.engage+';font-size:.85em">+ '+fmt(f.engage)+'</span>':''),CLR.c2026,l26.filter(function(d){return d.isValide;}).length+' BC');
-    h+=kpi('Conso 2025',fmt(f.t25)+' MAD',CLR.c2025,l25.length+' BC');
+    h+=kpi('Conso globale'+(f.engage>0?' + Engagé':''),fmt(f.valide)+' MAD'+(f.engage>0?' <span style="color:'+CLR.engage+';font-size:.85em">+ '+fmt(f.engage)+'</span>':''),CLR.c2026,l26.filter(function(d){return d.isValide;}).length+' BC');
+    h+=kpi('Conso N-1',fmt(f.t25)+' MAD',CLR.c2025,l25.length+' BC');
     h+=kpi('Variation',evT,evC,f.t25>0?fmt(f.total-f.t25)+' MAD':'');
-    h+=kpi('Total 2026 TTC',fmt(f.total)+' MAD',CLR.ink,f.count+' lignes');
+    h+=kpi('Total ciblé TTC',fmt(f.total)+' MAD',CLR.ink,f.count+' lignes');
     h+='</div>';
     var bm26=new Array(12).fill(0),bm25=new Array(12).fill(0);l26.forEach(function(d){if(d.isValide){var i=ACHAT_MONTHS.indexOf(d.mois);if(i>=0)bm26[i]+=d.montantTTC;}});l25.forEach(function(d){var i=ACHAT_MONTHS.indexOf(d.mois);if(i>=0)bm25[i]+=d.consommation;});
     h+='<div style="background:#fff;border:1px solid '+CLR.border+';border-radius:10px;padding:16px;margin-bottom:18px"><div style="font-weight:800;color:'+CLR.ink+';font-size:.95em;margin-bottom:12px">📊 Comparaison mensuelle</div><div style="height:240px;position:relative"><canvas id="modalFournChart"></canvas></div></div>';
-    h+='<div style="font-weight:800;color:'+CLR.ink+';margin-bottom:10px;font-size:.95em">Détail 2026 ('+l26.length+')</div>';
+    h+='<div style="font-weight:800;color:'+CLR.ink+';margin-bottom:10px;font-size:.95em">Détail des lignes ('+l26.length+')</div>';
     h+='<div style="max-height:300px;overflow-y:auto;border:1px solid '+CLR.border+';border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:.8em"><thead style="background:'+CLR.bg+';position:sticky;top:0"><tr><th style="padding:6px 8px;text-align:left;color:'+CLR.slate+'">BC</th><th style="padding:6px 8px;text-align:left;color:'+CLR.slate+'">Statut</th><th style="padding:6px 8px;text-align:left;color:'+CLR.slate+'">Désignation</th><th style="padding:6px 8px;text-align:right;color:'+CLR.slate+'">Montant TTC</th></tr></thead><tbody>';
     l26.sort(function(a,b){return b.montantTTC-a.montantTTC;}).forEach(function(l){var sc=l.isValide?CLR.c2026:l.isEngaged?CLR.engage:CLR.muted;var st=l.isValide?'Validé':l.isEngaged?'Engagé':l.statutBC;h+='<tr style="border-bottom:1px solid '+CLR.border+'"><td style="padding:6px 8px;font-weight:700;color:'+CLR.ink+'">'+l.bonCommande+'</td><td style="padding:6px 8px"><span style="background:'+sc+'20;color:'+sc+';padding:2px 8px;border-radius:4px;font-weight:700;font-size:.85em">'+st+'</span></td><td style="padding:6px 8px;color:'+CLR.muted+';max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+l.designation+'</td><td style="padding:6px 8px;text-align:right;font-weight:800;color:'+CLR.ink+'">'+fmt(l.montantTTC)+'</td></tr>';});
     h+='</tbody></table></div>';
     achHTML('modalContent',h);document.getElementById('achatDetailModal').style.display='flex';
     setTimeout(function(){rFChart(bm26,bm25);},150);
 }
-function rFChart(d26,d25){var c=document.getElementById('modalFournChart');if(!c||typeof Chart==='undefined')return;if(window._fC)window._fC.destroy();window._fC=new Chart(c.getContext('2d'),{type:'bar',data:{labels:ACHAT_MONTHS,datasets:[{label:'2026',data:d26.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2026,borderRadius:6,barPercentage:.45,categoryPercentage:.7},{label:'2025',data:d25.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2025+'80',borderColor:CLR.c2025,borderWidth:1,borderRadius:6,barPercentage:.45,categoryPercentage:.7}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:10,font:{size:11,weight:'600'}}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+' : '+ctx.raw.toLocaleString('fr-FR')+' K MAD';}}}},scales:{y:{display:false},x:{ticks:{font:{size:11,weight:'700'}},grid:{display:false}}}},plugins:[{id:'dlb',afterDatasetsDraw:function(ch){var ctx=ch.ctx;ch.data.datasets.forEach(function(ds,di){ch.getDatasetMeta(di).data.forEach(function(bar,i){var v=ds.data[i];if(!v)return;ctx.save();ctx.font='bold 9px sans-serif';ctx.fillStyle=di===0?CLR.c2026:CLR.c2025;ctx.textAlign='center';ctx.fillText(v.toLocaleString('fr-FR')+'K',bar.x,bar.y-6);ctx.restore();});});}}]});}
+function rFChart(d26,d25){var c=document.getElementById('modalFournChart');if(!c||typeof Chart==='undefined')return;if(window._fC)window._fC.destroy();window._fC=new Chart(c.getContext('2d'),{type:'bar',data:{labels:ACHAT_MONTHS,datasets:[{label:'Année cible',data:d26.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2026,borderRadius:6,barPercentage:.45,categoryPercentage:.7},{label:'Année N-1',data:d25.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2025+'80',borderColor:CLR.c2025,borderWidth:1,borderRadius:6,barPercentage:.45,categoryPercentage:.7}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:10,font:{size:11,weight:'600'}}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+' : '+ctx.raw.toLocaleString('fr-FR')+' K MAD';}}}},scales:{y:{display:false},x:{ticks:{font:{size:11,weight:'700'}},grid:{display:false}}}},plugins:[{id:'dlb',afterDatasetsDraw:function(ch){var ctx=ch.ctx;ch.data.datasets.forEach(function(ds,di){ch.getDatasetMeta(di).data.forEach(function(bar,i){var v=ds.data[i];if(!v)return;ctx.save();ctx.font='bold 9px sans-serif';ctx.fillStyle=di===0?CLR.c2026:CLR.c2025;ctx.textAlign='center';ctx.fillText(v.toLocaleString('fr-FR')+'K',bar.x,bar.y-6);ctx.restore();});});}}]});}
 
-// ===================================================================
-// TAB 3 : SIMULATEUR (UX premium, Code_article, tableau enrichi)
-// ===================================================================
-function searchArticle(){
-    var code=String((document.getElementById('calcArticleCode')||{}).value||"").trim();
-    var info=document.getElementById('calcArticleInfo');var list=document.getElementById('calcArticleSuggestions');
-    if(!code||code.length<2){if(info)info.innerHTML='';if(list)list.innerHTML='';window._calcArticle=null;runCalculator();return;}
-    var found=globalCodeArticle.filter(function(a){return a.code.toLowerCase().indexOf(code.toLowerCase())>=0||a.designation.toLowerCase().indexOf(code.toLowerCase())>=0;}).slice(0,8);
-    if(list){
-        if(found.length===0){list.innerHTML='<div style="padding:12px;color:'+CLR.rose+';font-weight:600;font-size:.88em">❌ Aucun article trouvé</div>';if(info)info.innerHTML='';return;}
-        var h='';found.forEach(function(a,i){
-            h+='<div onclick="selectArticle('+i+')" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid '+CLR.border+';transition:all .15s;display:flex;align-items:center;gap:12px" onmouseover="this.style.background=\'#f0f9ff\'" onmouseout="this.style.background=\'transparent\'">';
-            h+='<div style="background:'+CLR.indigo+'15;color:'+CLR.indigo+';padding:6px 10px;border-radius:6px;font-family:monospace;font-weight:800;font-size:.85em;white-space:nowrap">'+a.code+'</div>';
-            h+='<div style="flex:1;min-width:0"><div style="font-weight:700;color:'+CLR.ink+';font-size:.88em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+a.designation+'</div>';
-            h+='<div style="font-size:.75em;color:'+CLR.muted+';margin-top:2px">'+a.famille+' · '+a.section+'</div></div></div>';
-        });
-        list.innerHTML=h;window._calcSuggestions=found;
-    }
-}
-
-function selectArticle(idx){
-    var found=window._calcSuggestions||[];if(idx<0||idx>=found.length)return;
-    var art=found[idx];window._calcArticle=art;
-    var info=document.getElementById('calcArticleInfo');var list=document.getElementById('calcArticleSuggestions');
-    var input=document.getElementById('calcArticleCode');if(input)input.value=art.code;
-    if(list)list.innerHTML='';
-    if(info)info.innerHTML='<div style="background:linear-gradient(135deg,#f0fff4,#e6fffa);border:1px solid '+CLR.emerald+';border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;animation:fadeIn .3s ease"><div style="background:'+CLR.emerald+';color:#fff;padding:8px 14px;border-radius:8px;font-family:monospace;font-weight:800;font-size:.95em">'+art.code+'</div><div><div style="font-weight:800;color:'+CLR.ink+';font-size:.95em">'+art.designation+'</div><div style="color:'+CLR.slate+';font-size:.85em;margin-top:2px"><span style="background:'+CLR.purple+'15;color:'+CLR.purple+';padding:2px 8px;border-radius:4px;font-weight:700;font-size:.88em">'+art.famille+'</span> <span style="background:'+CLR.c2026+'15;color:'+CLR.c2026+';padding:2px 8px;border-radius:4px;font-weight:700;font-size:.88em;margin-left:4px">'+art.section+'</span></div></div></div>';
-    runCalculator();
-}
-
-function runCalculator(){
-    var art=window._calcArticle||null;
-    var cS=(document.getElementById('calcFilterSite')||{}).value||"";
-    var cM=(document.getElementById('calcFilterMois')||{}).value||"";
-    var montBC=pn((document.getElementById('calcMontantBC')||{}).value);
-    if(!art){achHTML('calcResultat','<div style="text-align:center;padding:40px;border:2px dashed '+CLR.border+';border-radius:12px"><div style="font-size:2.5em;margin-bottom:12px">🔍</div><div style="color:'+CLR.muted+';font-weight:600;font-size:1.05em">Recherchez un article par son code ou sa désignation</div><div style="color:'+CLR.border+';font-size:.85em;margin-top:6px">Les résultats s\'afficheront automatiquement</div></div>');achHTML('calcDetailTable','');return;}
-    var fam=art.famille,sec=art.section;
-    var moisAut=cM?[cM]:getYTDMonths();
-
-    var budT=globalBudgetApp.filter(function(b){if(b.famille!==fam)return false;if(sec&&b.section!==sec)return false;if(cS&&b.site!==cS)return false;if(moisAut.indexOf(b.mois)<0)return false;return true;}).reduce(function(s,b){return s+b.montant;},0);
-    var cLines=globalAchatData.filter(function(d){if(!d.isValide)return false;if(d.famille!==fam)return false;if(sec&&d.section!==sec)return false;if(cS&&d.site!==cS)return false;if(moisAut.indexOf(d.mois)<0)return false;return true;});
-    var consoT=cLines.reduce(function(s,d){return s+d.montantTTC;},0);
-    var eLines=globalAchatData.filter(function(d){if(!d.isEngaged)return false;if(d.famille!==fam)return false;if(sec&&d.section!==sec)return false;if(cS&&d.site!==cS)return false;if(moisAut.indexOf(d.mois)<0)return false;return true;});
-    var engT=eLines.reduce(function(s,d){return s+d.montantTTC;},0);
-    var c25Lines=globalAchatData2025.filter(function(d){if(d.famille!==fam)return false;if(sec&&d.section!==sec)return false;if(cS&&d.site!==cS)return false;if(moisAut.indexOf(d.mois)<0)return false;return true;});
-    var c25=c25Lines.reduce(function(s,d){return s+d.consommation;},0);
-
-    var dispo=budT-consoT-engT;var apres=dispo-montBC;
-    var taux=budT>0?((consoT+engT)/budT*100):0;var tauxA=budT>0?((consoT+engT+montBC)/budT*100):0;
-    var isOk=montBC<=dispo;
-    var ctx=fam+(sec?' · '+sec:'')+(cS?' · '+cS:'');
-    var prd=cM?cM:'YTD (Jan→'+ACHAT_MONTHS_FR[new Date().getMonth()]+')';
-
-    var h='';
-    // Insight
-    h+=insight(taux,budT,consoT+engT);h+='<div style="height:14px"></div>';
-    // KPIs
-    h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">';
-    h+=kpi('Objectif',fmt(budT)+' MAD',CLR.budget,ctx);
-    h+=kpi('Conso 2026'+(engT>0?' + Engagé':''),fmt(consoT)+' MAD'+(engT>0?' <span style="color:'+CLR.engage+';font-size:.85em">+ '+fmt(engT)+'</span>':''),CLR.c2026,cLines.length+' BC'+(eLines.length>0?' + '+eLines.length+' eng.':''));
-    h+=kpi('Conso 2025',fmt(c25)+' MAD',CLR.c2025,c25Lines.length+' BC · '+prd);
-    h+='</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px">';
-    h+=kpi('Disponible avant BC',fmt(dispo)+' MAD',dispo<0?CLR.rose:CLR.blue,fmtDec(taux,1)+'% consommé');
-    if(montBC>0)h+=kpi('Reste après BC',fmt(apres)+' MAD',apres<0?CLR.rose:CLR.emerald,fmtDec(tauxA,1)+'% consommé');
-    else h+=kpi('Reste après BC','Saisissez un montant',CLR.muted,'');
-    h+='</div>';
-    if(montBC>0&&tauxA>100)h+='<div style="padding:14px 18px;background:linear-gradient(135deg,#fff5f5,#fed7d7);border:1px solid '+CLR.rose+';border-radius:10px;color:'+CLR.rose+';font-weight:700;font-size:.9em;margin-bottom:16px;display:flex;align-items:center;gap:10px"><span style="font-size:1.5em">⚠️</span><span>Dépassement de '+fmt(Math.abs(apres))+' MAD ('+(tauxA-100).toFixed(1)+'%)</span></div>';
-    else if(montBC>0&&tauxA>85)h+='<div style="padding:14px 18px;background:linear-gradient(135deg,#fffaf0,#fefcbf);border:1px solid '+CLR.engage+';border-radius:10px;color:'+CLR.engage+';font-weight:700;font-size:.9em;margin-bottom:16px;display:flex;align-items:center;gap:10px"><span style="font-size:1.5em">🟠</span><span>Consommation à '+fmtDec(tauxA,1)+'% de l\'objectif</span></div>';
-    else if(montBC>0&&isOk)h+='<div style="padding:14px 18px;background:linear-gradient(135deg,#f0fff4,#c6f6d5);border:1px solid '+CLR.emerald+';border-radius:10px;color:'+CLR.emerald+';font-weight:700;font-size:.9em;margin-bottom:16px;display:flex;align-items:center;gap:10px"><span style="font-size:1.5em">✅</span><span>Disponible — '+fmt(apres)+' MAD restants</span></div>';
-    achHTML('calcResultat',h);
-
-    // Tableau détail enrichi
-    var allL=cLines.concat(eLines).sort(function(a,b){return b.montantTTC-a.montantTTC;});
-    var tb='';
-    if(allL.length>0){
-        tb+='<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 10px rgba(0,0,0,.03);border:1px solid '+CLR.border+';margin-top:20px">';
-        tb+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-weight:800;color:'+CLR.ink+';font-size:1em">📋 Détail des opérations <span style="color:'+CLR.muted+';font-weight:600;font-size:.85em">('+allL.length+')</span></div></div>';
-        tb+='<div style="max-height:450px;overflow-y:auto;border:1px solid '+CLR.border+';border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:.82em"><thead style="background:linear-gradient(180deg,#f7fafc,#edf2f7);position:sticky;top:0;z-index:1"><tr>';
-        tb+='<th style="padding:10px 8px;text-align:left;color:'+CLR.slate+';font-weight:700">Site</th>';
-        tb+='<th style="padding:10px 8px;text-align:left;color:'+CLR.slate+';font-weight:700">Code</th>';
-        tb+='<th style="padding:10px 8px;text-align:left;color:'+CLR.slate+';font-weight:700">Désignation</th>';
-        tb+='<th style="padding:10px 8px;text-align:left;color:'+CLR.slate+';font-weight:700">Famille</th>';
-        tb+='<th style="padding:10px 8px;text-align:left;color:'+CLR.slate+';font-weight:700">Section</th>';
-        tb+='<th style="padding:10px 8px;text-align:center;color:'+CLR.slate+';font-weight:700">Date</th>';
-        tb+='<th style="padding:10px 8px;text-align:right;color:'+CLR.slate+';font-weight:700">Qté</th>';
-        tb+='<th style="padding:10px 8px;text-align:right;color:'+CLR.slate+';font-weight:700">PU</th>';
-        tb+='<th style="padding:10px 8px;text-align:right;color:'+CLR.slate+';font-weight:700">Montant TTC</th>';
-        tb+='<th style="padding:10px 8px;text-align:center;color:'+CLR.slate+';font-weight:700">Statut</th>';
-        tb+='</tr></thead><tbody>';
-        allL.forEach(function(d,i){
-            var sc=d.isValide?CLR.c2026:CLR.engage;var st=d.isValide?'Validé':'Engagé';
-            var bg=i%2===0?'#fff':'#fafbfc';
-            tb+='<tr style="background:'+bg+';border-bottom:1px solid '+CLR.border+';transition:background .1s" onmouseover="this.style.background=\'#f0f9ff\'" onmouseout="this.style.background=\''+bg+'\'">';
-            tb+='<td style="padding:8px;font-weight:700;color:'+CLR.ink+'">'+d.site+'</td>';
-            tb+='<td style="padding:8px"><span style="background:'+CLR.indigo+'12;color:'+CLR.indigo+';padding:3px 8px;border-radius:5px;font-family:monospace;font-weight:700;font-size:.9em">'+d.article+'</span></td>';
-            tb+='<td style="padding:8px;color:'+CLR.slate+';max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+d.designation+'</td>';
-            tb+='<td style="padding:8px;color:'+CLR.muted+';font-size:.9em">'+d.famille+'</td>';
-            tb+='<td style="padding:8px;color:'+CLR.muted+';font-size:.88em;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+d.section+'</td>';
-            tb+='<td style="padding:8px;text-align:center;color:'+CLR.slate+';font-size:.88em">'+fmtDate(d.dateCreation)+'</td>';
-            tb+='<td style="padding:8px;text-align:right;font-weight:700;color:'+CLR.ink+'">'+fmt(d.qteCommandee)+'</td>';
-            tb+='<td style="padding:8px;text-align:right;color:'+CLR.slate+'">'+fmt(d.puRemise)+'</td>';
-            tb+='<td style="padding:8px;text-align:right;font-weight:800;color:'+CLR.ink+'">'+fmt(d.montantTTC)+'</td>';
-            tb+='<td style="padding:8px;text-align:center"><span style="background:'+sc+'15;color:'+sc+';padding:3px 10px;border-radius:6px;font-weight:700;font-size:.85em">'+st+'</span></td></tr>';
-        });
-        tb+='</tbody></table></div></div>';
-    }else{
-        tb='<div style="text-align:center;color:'+CLR.muted+';padding:30px;margin-top:20px;font-weight:600;border:2px dashed '+CLR.border+';border-radius:12px">Aucune opération trouvée</div>';
-    }
-    achHTML('calcDetailTable',tb);
-}
-
-// ===================================================================
 // EXPORTS + CLOSE
-// ===================================================================
 function closeAchatDetailModal(e){if(e&&e.target&&e.target.id!=='achatDetailModal')return;document.getElementById('achatDetailModal').style.display='none';}
 function exportModalExcel(){if(!currentModalRows||!currentModalRows.length){alert('Aucune donnée.');return;}if(typeof XLSX==='undefined'){alert('XLSX non chargé.');return;}var data=currentModalRows.map(function(l){return{'Site':l.site,'BC':l.bonCommande,'Fournisseur':l.fournisseur,'Désignation':l.designation,'Famille':l.famille,'Section':l.section,'Montant TTC':l.montantTTC};});var ws=XLSX.utils.json_to_sheet(data);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Détail');XLSX.writeFile(wb,'detail_'+currentModalTitle+'.xlsx');}
 function exportModalPDF(){if(typeof html2canvas==='undefined'){alert('html2canvas non chargé.');return;}var content=document.getElementById('modalContent');if(!content)return;html2canvas(content,{scale:2}).then(function(canvas){if(typeof jspdf==='undefined'&&typeof jsPDF==='undefined'){alert('jsPDF non chargé.');return;}var J=(typeof jspdf!=='undefined')?jspdf.jsPDF:jsPDF;var pdf=new J('l','mm','a4');var img=canvas.toDataURL('image/png');var w=pdf.internal.pageSize.getWidth()-20;var h=canvas.height*w/canvas.width;pdf.addImage(img,'PNG',10,10,w,h);pdf.save('detail_'+currentModalTitle+'.pdf');});}
