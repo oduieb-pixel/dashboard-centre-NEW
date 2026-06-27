@@ -2659,3 +2659,189 @@ function changeUserPassword(username, oldPass, newPass, clientIp) {
   }
   return { success:false, message:'Utilisateur non trouvé.' };
 }
+// =======================================================================
+// MODULE ACHAT — getAchatData()
+// Sources UNIQUES : BDD_CND_APP (2026) + BDD_CND_APP_2025 (2025)
+// Feuille principale : MAIN_SPREADSHEET_ID
+// CSS = CCS (correction orthographe)
+// Chargement ultra-rapide : une seule lecture par feuille, cache 10 min
+// =======================================================================
+
+// -----------------------------------------------------------------------
+// CONSTANTES COLONNES BDD_CND_APP (headers ligne 2, données ligne 3+)
+// -----------------------------------------------------------------------
+// Col 0  : N° Demande
+// Col 1  : Site / Entité
+// Col 2  : Statut DA
+// Col 6  : Date Création DA
+// Col 17 : Code Article
+// Col 18 : Désignation
+// Col 19 : Qté commandée
+// Col 20 : PU Offre
+// Col 21 : PU Remise
+// Col 22 : % Remise
+// Col 23 : TVA
+// Col 24 : Section
+// Col 25 : Sous-Famille
+// Col 26 : Famille
+// Col 27 : Code Comptable
+// Col 28 : N° BC
+// Col 29 : Devise
+// Col 30 : ID Ligne Commande  ← clé déduplication
+// Col 31 : Fournisseur
+// Col 32 : Statut BC
+// Col 33 : Acheteur
+// Col 34 : Date Création BC
+// Col 35 : Date Livraison Prévue
+// Col 36 : Date Validation BC
+// Col 37 : Montant HT
+// Col 38 : Montant TTC
+// Col 39 : Montant Offre
+// Col 40 : Valeur Économisée
+// Col 41 : Modalité Paiement
+// Col 57 : Réf Comptable (réconciliation Sage — non utilisée ici)
+// -----------------------------------------------------------------------
+const ACHAT_CACHE_KEY  = 'ACHAT_DATA_v23';
+const ACHAT_CACHE_SEC  = 600; // 10 min
+
+var SITE_MAP_ACHAT = {
+  'CSS':'CCS','CCS':'CCS','CCSS':'CCS',
+  'CIMOG':'CIMO','CIMO':'CIMO',
+  'HPBM':'HPB','HPB':'HPB',
+  'HIIN':'HIIN','CIOB':'CIOB'
+};
+function normSiteAchat(s){
+  var u=String(s||'').trim().toUpperCase();
+  return SITE_MAP_ACHAT[u]||u;
+}
+function pnAchat(v){
+  if(v==null||v==='')return 0;
+  if(typeof v==='number')return isNaN(v)?0:v;
+  var s=String(v).trim().replace(/\s/g,'').replace(',','.');
+  return isNaN(parseFloat(s))?0:parseFloat(s);
+}
+function isoAchat(d){
+  if(!d||!(d instanceof Date)||isNaN(d))return null;
+  return d.toISOString();
+}
+
+/* Taux de réduction par famille (objectif = conso2025 × (1–taux)) */
+var TAUX_OPT = {
+  'médicament':0.04,'consommable':0.06,'matériel pharmacie':0.05,
+  'réactif':0.05,'restauration':0.12,'prestation':0.06,
+  'eau':0.10,'électricité':0.10,'entretien':0.05,'maintenance':0.05,
+  'communication':0.08,'déplacement':0.10,'mission':0.10,
+  'honoraire':0.03,'assurance':0.02,'management':0.00,
+  'autres charges':0.15,'default':0.05
+};
+function getTaux(famille){
+  var lo=String(famille||'').toLowerCase();
+  for(var k in TAUX_OPT){if(k!=='default'&&lo.indexOf(k)>=0)return TAUX_OPT[k];}
+  return TAUX_OPT['default'];
+}
+
+/* Lecture d'une feuille BDD_CND_APP */
+function readBddCnd(sheetName,annee){
+  var ss=SpreadsheetApp.openById(MAIN_SPREADSHEET_ID);
+  var sh=ss.getSheetByName(sheetName);
+  if(!sh||sh.getLastRow()<3)return[];
+  var lastRow=sh.getLastRow();
+  var lastCol=Math.min(sh.getLastColumn(),58);
+  var data=sh.getRange(3,1,lastRow-2,lastCol).getValues();
+
+  var MONTHS_ABBR=['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
+  var rows=[];
+  var seen=new Set();
+
+  data.forEach(function(r){
+    var demande=String(r[0]||'').trim();
+    if(!demande)return;
+    var idLigne=String(r[30]||'').trim();
+    if(idLigne){if(seen.has(idLigne))return;seen.add(idLigne);}
+
+    var statutBC=String(r[32]||'').trim();
+    var isV=/^valid[eé]$/i.test(statutBC);
+    var isE=statutBC.toLowerCase()==='en validation';
+    var mt=pnAchat(r[38]);
+
+    /* Mois depuis dateCreation col 6 */
+    var dateDA=r[6];var mois=null;
+    if(dateDA instanceof Date&&!isNaN(dateDA))mois=MONTHS_ABBR[dateDA.getMonth()];
+
+    rows.push({
+      annee        :annee,
+      demande      :demande,
+      idLigneCmd   :idLigne,
+      site         :normSiteAchat(r[1]),
+      statutBC     :statutBC,
+      isValide     :isV,
+      isEngaged    :isE,
+      section      :String(r[24]||'').trim()||'Non défini',
+      famille      :String(r[26]||'').trim()||'Autres',
+      bonCommande  :String(r[28]||'').trim(),
+      designation  :String(r[18]||'').trim(),
+      fournisseur  :String(r[31]||'').trim()||'Non défini',
+      montantTTC   :mt,
+      montantOffre :pnAchat(r[39]),
+      valeurEcon   :pnAchat(r[40]),
+      mois         :mois,
+      consommation :isV?mt:0,
+      /* Dates pour calcul délais */
+      dateCreation :isoAchat(r[6]),
+      dateCreaBC   :isoAchat(r[34]),
+      dateValidBC  :isoAchat(r[36]),
+      /* dateValid1/2/3 → pour recalcul lastValidation côté JS */
+      dateValid1   :isoAchat(r[11]),
+      dateValid2   :isoAchat(r[13]),
+      dateValid3   :isoAchat(r[15])
+    });
+  });
+  return rows;
+}
+
+/* Calcul objectif depuis conso 2025 par (site, famille, section) */
+function calcObjAchat(rows2025){
+  var map={};
+  rows2025.forEach(function(r){
+    if(!r.isValide)return;
+    var k=(r.site||'ALL')+'|'+(r.famille||'Autres')+'|'+(r.section||'Non défini');
+    if(!map[k])map[k]={site:r.site,famille:r.famille,section:r.section,conso:0};
+    map[k].conso+=r.montantTTC;
+  });
+  return Object.values(map).filter(function(o){return o.conso>0;}).map(function(o){
+    var taux=getTaux(o.famille);
+    return{site:o.site,famille:o.famille,section:o.section,conso2025:o.conso,taux:taux,objectif:Math.round(o.conso*(1-taux))};
+  });
+}
+
+function getAchatData(){
+  try{
+    var cache=CacheService.getScriptCache();
+    var cached=cache.get(ACHAT_CACHE_KEY);
+    if(cached){try{var p=JSON.parse(cached);p.fromCache=true;return p;}catch(e){}}
+
+    var today=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm');
+    var d2026=readBddCnd('BDD_CND_APP',     2026);
+    var d2025=readBddCnd('BDD_CND_APP_2025',2025);
+    var objectifs=calcObjAchat(d2025);
+
+    var result={data:d2026,data2025:d2025,objectifs:objectifs,lastUpdate:today,fromCache:false};
+
+    try{
+      var json=JSON.stringify(result);
+      if(json.length<95000){cache.put(ACHAT_CACHE_KEY,json,ACHAT_CACHE_SEC);}
+      else{
+        /* Trop gros : tronquer */
+        result.data=d2026.slice(0,2500);result.data2025=d2025.slice(0,2500);result.truncated=true;
+        cache.put(ACHAT_CACHE_KEY,JSON.stringify(result),ACHAT_CACHE_SEC);
+      }
+    }catch(e){Logger.log('Cache write: '+e.message);}
+
+    return result;
+  }catch(e){
+    Logger.log('getAchatData error: '+e.message);
+    return{data:[],data2025:[],objectifs:[],lastUpdate:'Erreur',error:e.message};
+  }
+}
+
+function clearAchatCache(){CacheService.getScriptCache().remove(ACHAT_CACHE_KEY);return 'Cache vidé.';}
