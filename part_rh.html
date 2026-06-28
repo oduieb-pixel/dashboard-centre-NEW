@@ -1,317 +1,338 @@
 <div id="view-rh" class="view-section export-section" data-export-title="Ressources Humaines">
-  <style>
-    :root{
-      --bg:#F5F8FC; --card:#FFFFFF; --text:#0F172A; --muted:#64748B;
-      --line:#E8EEF6; --blue:#2E90FA; --green:#10B981; --red:#EF4444;
-      --pink:#EC4899; --violet:#6366F1; --radius:16px;
-      --shadow:0 10px 25px rgba(15,23,42,0.06);
-    }
-    .rh-wrapper{ width: 100%; box-sizing:border-box; padding:10px 5px; display:flex; flex-direction:column; gap:14px; overflow:auto; font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
-    .rh-header{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap: wrap; }
-    .rh-filters{ display:flex; align-items:center; gap:10px; flex-wrap: wrap; width: 100%; justify-content: flex-start; }
-    .rh-filters .lblf{ font-weight:800; color:#5B6B82; font-size:12px; letter-spacing:.3px; text-transform:uppercase; }
-    .rh-select{ border:1px solid var(--line); border-radius:12px; padding:9px 12px; background:#FBFDFF; color:#0F172A; font-weight:800; outline:none; min-width:120px; }
-    
-    .kpi-section{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
-    .kpi-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px; position:relative; overflow:hidden; }
-    .kpi-card::after{ content:""; position:absolute; right:-24px; top:-24px; width:96px; height:96px; border-radius:50%; background:rgba(46,144,250,0.08); }
-    .kpi-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
-    .lbl{ font-size:11px; font-weight:900; letter-spacing:.45px; text-transform:uppercase; color:#94A3B8; }
-    .icon{ font-size:18px; color:#BFD4F5; }
-    .val{ font-size:32px; font-weight:1000; color:#0F172A; letter-spacing:.3px; line-height:1; }
-    .sub{ margin-top:6px; font-weight:800; color:#64748B; font-size:12px; }
-    .b-blue{ border-left:5px solid var(--blue); } .b-blue .lbl{ color:var(--blue); }
-    .b-green{ border-left:5px solid var(--green); } .b-green .lbl{ color:var(--green); }
-    .b-red{ border-left:5px solid var(--red); } .b-red .lbl{ color:var(--red); }
-    .b-violet{ border-left:5px solid var(--violet); } .b-violet .lbl{ color:var(--violet); }
+<style>
+:root{
+  --bg:#F5F8FC; --card:#FFFFFF; --text:#0F172A; --muted:#64748B;
+  --line:#E8EEF6; --blue:#2E90FA; --green:#10B981; --red:#EF4444;
+  --pink:#EC4899; --violet:#6366F1; --purple:#8B5CF6; --radius:16px;
+  --shadow:0 10px 25px rgba(15,23,42,0.06);
+}
+.rh-wrapper{ width:100%; box-sizing:border-box; padding:10px 5px; display:flex; flex-direction:column; gap:14px; overflow:auto; font-family:"Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
 
-    .charts-section{ display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:12px; align-items:stretch; }
-    .chart-box{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px; overflow:hidden; }
-    .chart-header{ font-weight:1000; color:#0F172A; text-transform:uppercase; letter-spacing:.4px; font-size:12px; margin-bottom:10px; }
-    .cv-wrap{ height:220px; }
+/* ============ BANNER VIOLET DYNAMIQUE (3 pages) ============ */
+.rh-banner{
+  background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 100%);
+  border-radius:var(--radius); padding:20px 26px;
+  display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+  box-shadow:0 10px 28px rgba(99,102,241,.22);
+  position:relative; overflow:hidden;
+}
+.rh-banner::before{ content:""; position:absolute; right:-40px; top:-40px; width:200px; height:200px; border-radius:50%; background:rgba(255,255,255,.07); }
+.rh-banner::after{ content:""; position:absolute; right:60px; bottom:-30px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.05); }
+.rh-banner-left{ display:flex; align-items:center; gap:16px; position:relative; z-index:1; }
+.rh-banner-icon{ width:46px; height:46px; border-radius:12px; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.22); display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; }
+.rh-banner-text{ display:flex; flex-direction:column; gap:3px; }
+.rh-banner-title{ color:#fff; font-size:16px; font-weight:900; letter-spacing:.4px; text-transform:uppercase; }
+.rh-banner-sub{ color:rgba(255,255,255,.78); font-size:12px; font-weight:700; }
+.rh-banner-badge{ background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.28); color:#fff; border-radius:999px; padding:8px 18px; font-size:12px; font-weight:800; letter-spacing:.3px; position:relative; z-index:1; }
 
-    .cat-list{ display:flex; flex-direction:column; gap:14px; padding:6px 2px 2px; }
-    .cat-row{ display:grid; grid-template-columns: 140px 1fr 60px; align-items:center; gap:14px; cursor:pointer; }
-    .cat-label{ font-weight:900; color:#334155; font-size:13px; }
-    .cat-bar{ height:10px; background:#EAF0F8; border-radius:999px; overflow:hidden; }
-    .cat-fill{ height:100%; width:0%; border-radius:999px; transition:width .35s ease; }
-    .cat-pct{ text-align:right; font-weight:1000; color:#334155; font-size:13px; }
+/* ============ FILTRES UNIFIÉS ============ */
+.rh-filters-bar{
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:14px 18px;
+  display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;
+}
+.filter-card{ display:flex; flex-direction:column; gap:5px; position:relative; }
+.f-label{ font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; color:#94A3B8; }
+.rh-select{ border:1.5px solid var(--line); border-radius:10px; padding:8px 12px; background:#FBFDFF; color:#0F172A; font-weight:800; outline:none; min-width:130px; font-size:13px; transition:border-color .2s; cursor:pointer; }
+.rh-select:focus{ border-color:#6366F1; }
 
-    .age-section{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px; overflow:hidden; }
-    .age-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px; }
-    .age-card{ border:1px solid var(--line); border-radius:14px; background:#FBFDFF; padding:12px 12px 10px; cursor:pointer; }
-    .age-top{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:6px; }
-    .age-val{ font-weight:1000; color:#1D4ED8; font-size:18px; }
-    .age-pct{ font-weight:1000; color:#64748B; font-size:12px; }
-    .age-label{ font-weight:900; color:#334155; font-size:12px; margin-bottom:8px; }
-    .age-bar{ height:8px; background:#EAF0F8; border-radius:999px; overflow:hidden; }
-    .age-fill{ height:100%; width:0%; border-radius:999px; transition:width .35s ease; background:#6366F1; }
+/* MULTI-SELECT */
+.ms-wrap{ position:relative; }
+.ms-trigger{
+  border:1.5px solid var(--line); border-radius:10px; padding:8px 12px; background:#FBFDFF;
+  color:#0F172A; font-weight:800; outline:none; min-width:160px; font-size:13px;
+  cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px;
+  transition:border-color .2s;
+}
+.ms-trigger:hover{ border-color:#C4B5FD; }
+.ms-trigger.open{ border-color:#6366F1; }
+.ms-trigger-value{ flex:1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ms-chevron{ font-size:10px; color:#64748B; transition:transform .2s; }
+.ms-trigger.open .ms-chevron{ transform:rotate(180deg); }
+.ms-dropdown{
+  position:absolute; top:calc(100% + 6px); left:0; min-width:220px; max-width:300px;
+  background:#fff; border:1.5px solid var(--line); border-radius:12px;
+  box-shadow:0 12px 30px rgba(15,23,42,.12);
+  z-index:1000; display:none; max-height:340px; overflow:hidden;
+}
+.ms-dropdown.open{ display:block; }
+.ms-actions{ display:flex; gap:6px; padding:10px 12px 8px; border-bottom:1px solid var(--line); }
+.ms-actions button{
+  padding:5px 12px; border-radius:7px; border:1.5px solid var(--line); background:#fff;
+  color:#475569; font-size:11px; font-weight:800; cursor:pointer; transition:all .15s;
+}
+.ms-actions button:hover{ background:#FAFAFF; color:#6366F1; border-color:#C4B5FD; }
+.ms-options{ max-height:260px; overflow-y:auto; padding:6px 0; }
+.ms-option{
+  display:flex; align-items:center; gap:10px; padding:8px 14px;
+  cursor:pointer; font-size:13px; color:#334155; font-weight:700; transition:background .12s;
+}
+.ms-option:hover{ background:#F8FAFC; }
+.ms-option.selected{ background:#FAFAFF; color:#6366F1; }
+.ms-checkbox{
+  width:16px; height:16px; border:1.5px solid #CBD5E1; border-radius:4px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; transition:all .15s; background:#fff;
+}
+.ms-option.selected .ms-checkbox{ background:#6366F1; border-color:#6366F1; }
+.ms-option.selected .ms-checkbox::after{ content:"\\2713"; color:#fff; font-size:12px; font-weight:900; }
 
-    /* ========== MASSE SALARIALE & CONGES ========== */
-    .mass-wrap{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; display:grid; grid-template-columns:1fr; gap:16px; }
-    .mass-left{ display:flex; flex-direction:column; gap:14px; }
-    .mass-kpis{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:8px; }
-    .mini-kpi{ border:1px solid #E8EEF6; border-radius:14px; background:#FBFDFF; padding:12px 14px; position:relative; }
-    .mini-kpi.kpi-budget{ border-left:4px solid #FBBF24; }
-    .mini-kpi.kpi-masse{ border-left:4px solid #8B5CF6; }
-    .mini-kpi.kpi-taux{ border-left:4px solid #F59E0B; }
-    .mini-kpi.kpi-vars{ border-left:4px solid #10B981; }
-    .kpi-top{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px; }
-    .mini-kpi .t{ font-size:11px; font-weight:900; text-transform:uppercase; color:#64748B; letter-spacing:.4px; }
-    .mini-kpi .v{ font-size:26px; font-weight:1000; color:#0F172A; letter-spacing:.2px; }
-    .mini-kpi .s{ font-size:11px; font-weight:800; color:#94A3B8; margin-top:4px; }
-    .mass-charts{ display:grid; grid-template-columns:2fr 1fr; gap:12px; }
-    .chart-card{ border:1px solid #E8EEF6; border-radius:14px; background:#FBFDFF; padding:14px; }
-    .chart-card.chart-lg{ grid-column:1/2; }
-    .chart-title{ font-weight:900; text-transform:uppercase; letter-spacing:.4px; font-size:12px; color:#334155; margin-bottom:12px; }
-    
-    .rh-masse-detail-card{ border:1px solid #E8EEF6; border-radius:14px; background:#FBFDFF; padding:14px; display:flex; flex-direction:column; gap:12px; }
-    .rh-masse-detail-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding-bottom:10px; border-bottom:1px solid #E8EEF6; }
-    .rh-masse-detail-title{ font-weight:900; text-transform:uppercase; letter-spacing:.4px; font-size:12px; color:#334155; display:flex; align-items:center; gap:8px; }
-    .rh-masse-detail-badge{ font-size:11px; font-weight:800; color:#0EA5E9; background:#EFF8FF; border:1px solid #B9E0FA; border-radius:999px; padding:4px 10px; }
-    .rh-masse-bars{ display:flex; flex-direction:column; gap:12px; }
-    .rh-masse-bar-row{ display:grid; grid-template-columns:80px 1fr auto; align-items:center; gap:10px; }
-    .rh-masse-bar-label{ font-weight:900; font-size:12px; color:#475569; text-transform:uppercase; letter-spacing:.3px; }
-    .rh-masse-bar-track{ height:12px; background:#E8EEF6; border-radius:999px; overflow:hidden; position:relative; }
-    .rh-masse-bar-fill{ height:100%; width:0%; border-radius:999px; transition:width .4s ease; }
-    .rh-masse-bar-fill.actes{ background:linear-gradient(90deg,#0EA5E9,#06B6D4); }
-    .rh-masse-bar-fill.garde{ background:linear-gradient(90deg,#6366F1,#8B5CF6); }
-    .rh-masse-bar-fill.df{ background:linear-gradient(90deg,#F59E0B,#FBBF24); }
-    .rh-masse-bar-fill.autres{ background:linear-gradient(90deg,#94A3B8,#CBD5E1); }
-    .rh-masse-bar-val{ display:flex; align-items:baseline; gap:8px; min-width:140px; justify-content:flex-end; }
-    .rh-masse-bar-val .amt{ font-weight:1000; font-size:14px; color:#0F172A; }
-    .rh-masse-bar-val .pct{ font-weight:900; font-size:11px; color:#64748B; }
-    
-    .table-mini{ width:100%; border-collapse:collapse; font-size:13px; }
-    .table-mini thead{ background:#f1f5f9; border-bottom:2px solid #cbd5e1; }
-    .table-mini th{ padding:8px 10px; text-align:left; font-weight:900; color:#334155; text-transform:uppercase; font-size:11px; letter-spacing:.3px; }
-    .table-mini td{ padding:8px 10px; color:#475569; border-bottom:1px solid #e2e8f0; font-weight:700; }
-    .table-mini tbody tr:last-child td{ border-bottom:none; }
-    .table-mini tbody tr:hover{ background:#f8fafc; }
+/* ============ TABS ============ */
+.rh-tabs{ display:flex; gap:8px; flex-wrap:wrap; }
+.rh-tab-btn{ padding:10px 22px; border-radius:11px; font-weight:900; font-size:12px; cursor:pointer; border:1.5px solid var(--line); background:#fff; color:#5B6B82; transition:all .18s ease; text-transform:uppercase; letter-spacing:.4px; }
+.rh-tab-btn:hover{ border-color:#C4B5FD; color:#6366F1; background:#FAFAFF; }
+.rh-tab-btn.active{ background:#6366F1; color:#fff; border-color:#6366F1; box-shadow:0 4px 12px rgba(99,102,241,.3); }
+.rh-page{ display:flex; flex-direction:column; gap:14px; }
+.rh-page.hidden{ display:none; }
 
-    .kpi-chip{ font-size:12px; font-weight:700; color:#334155; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:4px 10px; min-width:56px; text-align:center; }
-    
-    .rh-tabs{ display:flex; gap:10px; flex-wrap:wrap; margin-top:5px; }
-    .rh-tab-btn{ padding:10px 16px; border-radius:12px; font-weight:900; font-size:13px; cursor:pointer; border:1px solid var(--line); background:#fff; color:#5B6B82; transition:all .2s ease; }
-    .rh-tab-btn:hover{ border-color:#B9D4FF; color:#173B7A; }
-    .rh-tab-btn.active{ background:#173B7A; color:#fff; border-color:#173B7A; box-shadow:0 4px 10px rgba(23,59,122,.25); }
-    .rh-page{ display:flex; flex-direction:column; gap:14px; }
-    .rh-page.hidden{ display:none; }
-    .conges-kpis{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+/* ============ KPI CARDS VUE GLOBALE ============ */
+.kpi-section{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
+.kpi-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px; position:relative; overflow:hidden; transition:transform .2s, box-shadow .2s; }
+.kpi-card:hover{ transform:translateY(-2px); box-shadow:0 14px 30px rgba(15,23,42,.1); }
+.kpi-card::after{ content:""; position:absolute; right:-24px; top:-24px; width:96px; height:96px; border-radius:50%; background:rgba(46,144,250,0.08); }
+.kpi-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.lbl{ font-size:11px; font-weight:900; letter-spacing:.45px; text-transform:uppercase; color:#94A3B8; }
+.icon{ font-size:18px; color:#BFD4F5; }
+.val{ font-size:32px; font-weight:1000; color:#0F172A; letter-spacing:.3px; line-height:1; }
+.sub{ margin-top:6px; font-weight:800; color:#64748B; font-size:12px; }
+.b-blue{ border-left:5px solid var(--blue); } .b-blue .lbl{ color:var(--blue); }
+.b-green{ border-left:5px solid var(--green); } .b-green .lbl{ color:var(--green); }
+.b-red{ border-left:5px solid var(--red); } .b-red .lbl{ color:var(--red); }
+.b-violet{ border-left:5px solid var(--violet); } .b-violet .lbl{ color:var(--violet); }
+.charts-section{ display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:12px; align-items:stretch; }
+.chart-box{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; overflow:hidden; }
+.chart-header{ font-weight:1000; color:#0F172A; text-transform:uppercase; letter-spacing:.4px; font-size:12px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.chart-header-dot{ width:8px; height:8px; border-radius:50%; background:#6366F1; }
+.cv-wrap{ height:220px; }
+.cat-list{ display:flex; flex-direction:column; gap:14px; padding:6px 2px 2px; }
+.cat-row{ display:grid; grid-template-columns:140px 1fr 60px; align-items:center; gap:14px; cursor:pointer; }
+.cat-label{ font-weight:900; color:#334155; font-size:13px; }
+.cat-bar{ height:10px; background:#EAF0F8; border-radius:999px; overflow:hidden; }
+.cat-fill{ height:100%; width:0%; border-radius:999px; transition:width .35s ease; }
+.cat-pct{ text-align:right; font-weight:1000; color:#334155; font-size:13px; }
+.age-section{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; overflow:hidden; }
+.age-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; }
+.age-card{ border:1px solid var(--line); border-radius:14px; background:#FBFDFF; padding:12px 12px 10px; cursor:pointer; transition:all .2s; }
+.age-card:hover{ border-color:#C4B5FD; transform:translateY(-2px); }
+.age-top{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:6px; }
+.age-val{ font-weight:1000; color:#6366F1; font-size:18px; }
+.age-pct{ font-weight:1000; color:#64748B; font-size:12px; }
+.age-label{ font-weight:900; color:#334155; font-size:12px; margin-bottom:8px; }
+.age-bar{ height:8px; background:#EAF0F8; border-radius:999px; overflow:hidden; }
+.age-fill{ height:100%; width:0%; border-radius:999px; transition:width .35s ease; background:linear-gradient(90deg,#6366F1,#8B5CF6); }
 
-    #rhModalMask{ position:fixed; inset:0; background:rgba(15,23,42,0.55); display:none; align-items:center; justify-content:center; z-index:9999; }
-    .rh-modal{ background:#fff; border-radius:16px; padding:0; width:92%; max-width:960px; max-height:85vh; overflow:auto; box-shadow:0 25px 50px rgba(15,23,42,0.3); }
-    .rh-modal-head{ background:#f1f5f9; border-bottom:1px solid #e2e8f0; padding:16px 20px; display:flex; align-items:center; justify-content:space-between; border-radius:16px 16px 0 0; }
-    .rh-modal-head > div{ font-weight:1000; font-size:15px; color:#1e293b; text-transform:uppercase; letter-spacing:.3px; }
-    .rh-modal-head button{ border:none; background:#cbd5e1; color:#1e293b; padding:7px 12px; border-radius:8px; font-weight:900; cursor:pointer; font-size:12px; text-transform:uppercase; }
-    .rh-modal-head button:hover{ background:#94a3b8; }
-    .rh-modal-body{ padding:20px; height:450px; }
-    .rh-modal-body canvas{ width:100%!important; height:100%!important; }
-    #rhHoverTip{ position:absolute; display:none; background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; box-shadow:0 10px 25px rgba(15,23,42,0.15); font-size:13px; color:#1e293b; pointer-events:none; z-index:9998; white-space:nowrap; }
-    .filter-card{ display:flex; align-items:center; gap:8px; }
-    
-    @media (max-width: 900px){ .mass-charts{ grid-template-columns:1fr; } }
-  </style>
+/* ============ MASSE SALARIALE ============ */
+.mass-wrap{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px 18px; display:flex; flex-direction:column; gap:16px; }
+.mass-kpis{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
+.mini-kpi{ border:1px solid #E8EEF6; border-radius:14px; background:#FBFDFF; padding:14px 16px; position:relative; transition:all .2s; }
+.mini-kpi:hover{ box-shadow:0 8px 20px rgba(15,23,42,.08); transform:translateY(-2px); }
+.mini-kpi.kpi-budget{ border-left:4px solid #FBBF24; }
+.mini-kpi.kpi-masse{ border-left:4px solid #8B5CF6; }
+.mini-kpi.kpi-taux{ border-left:4px solid #F59E0B; }
+.mini-kpi.kpi-vars{ border-left:4px solid #10B981; }
+.kpi-top{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.mini-kpi .t{ font-size:10px; font-weight:900; text-transform:uppercase; color:#94A3B8; letter-spacing:.5px; }
+.mini-kpi .v{ font-size:26px; font-weight:1000; color:#0F172A; letter-spacing:.2px; line-height:1.1; }
+.mini-kpi .s{ font-size:11px; font-weight:700; color:#94A3B8; margin-top:4px; }
+.kpi-chip{ font-size:11px; font-weight:800; color:#475569; background:#F1F5F9; border:1px solid #E2E8F0; border-radius:999px; padding:3px 10px; min-width:50px; text-align:center; }
+.mass-charts{ display:grid; grid-template-columns:2fr 1fr; gap:14px; }
+.chart-card{ border:1px solid #E8EEF6; border-radius:14px; background:#fff; padding:16px 18px; box-shadow:0 4px 14px rgba(15,23,42,.04); position:relative; }
+.chart-title{ font-weight:900; text-transform:uppercase; letter-spacing:.5px; font-size:11px; color:#334155; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+.chart-title-dot{ width:8px; height:8px; border-radius:50%; background:#8B5CF6; }
+.rh-masse-detail-card{ border:1px solid #E8EEF6; border-radius:14px; background:#fff; padding:16px 18px; display:flex; flex-direction:column; gap:12px; box-shadow:0 4px 14px rgba(15,23,42,.04); }
+.rh-masse-detail-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding-bottom:11px; border-bottom:1px solid #E8EEF6; }
+.rh-masse-detail-title{ font-weight:900; text-transform:uppercase; letter-spacing:.5px; font-size:11px; color:#334155; }
+.rh-masse-detail-badge{ font-size:11px; font-weight:800; color:#8B5CF6; background:#F3F0FF; border:1px solid #D8CFFE; border-radius:999px; padding:4px 11px; }
+.rh-masse-bars{ display:flex; flex-direction:column; gap:14px; }
+.rh-masse-bar-row{ display:grid; grid-template-columns:80px 1fr auto; align-items:center; gap:12px; }
+.rh-masse-bar-label{ font-weight:900; font-size:11px; color:#64748B; text-transform:uppercase; letter-spacing:.4px; }
+.rh-masse-bar-track{ height:11px; background:#EEF2F9; border-radius:999px; overflow:hidden; }
+.rh-masse-bar-fill{ height:100%; width:0%; border-radius:999px; transition:width .45s cubic-bezier(.4,0,.2,1); }
+.rh-masse-bar-fill.actes{ background:linear-gradient(90deg,#0EA5E9,#06B6D4); }
+.rh-masse-bar-fill.garde{ background:linear-gradient(90deg,#6366F1,#8B5CF6); }
+.rh-masse-bar-fill.df{ background:linear-gradient(90deg,#F59E0B,#FBBF24); }
+.rh-masse-bar-fill.autres{ background:linear-gradient(90deg,#94A3B8,#CBD5E1); }
+.rh-masse-bar-val{ display:flex; align-items:baseline; gap:8px; min-width:140px; justify-content:flex-end; }
+.rh-masse-bar-val .amt{ font-weight:1000; font-size:13px; color:#0F172A; }
+.rh-masse-bar-val .pct{ font-weight:900; font-size:11px; color:#94A3B8; }
 
-  <div class="rh-wrapper">
-    <div id="rhHoverTip"></div>
+/* ============ CONGES ============ */
+.conges-kpis{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+.table-mini{ width:100%; border-collapse:collapse; font-size:13px; }
+.table-mini thead{ background:#F1F5F9; }
+.table-mini th{ padding:10px 12px; text-align:left; font-weight:900; color:#334155; text-transform:uppercase; font-size:10px; letter-spacing:.4px; border-bottom:2px solid #CBD5E1; }
+.table-mini td{ padding:10px 12px; color:#475569; border-bottom:1px solid #E8EEF6; font-weight:700; }
+.table-mini tbody tr:last-child td{ border-bottom:none; }
+.table-mini tbody tr:hover{ background:#F8FAFC; }
 
-    <div class="rh-header">
-      <div class="rh-filters">
-        <div class="filter-card">
-          <div class="f-label">entité</div>
-          <select id="rhEntite" class="rh-select"></select>
-        </div>
-        <div class="filter-card" id="rhSubEntiteWrap" style="display:none;">
-          <div class="f-label">sous-entité</div>
-          <select id="rhSousEntite" class="rh-select"></select>
-        </div>
-        <div class="filter-card">
-          <div class="f-label">trimestre</div>
-          <select id="rhTrimestre" class="rh-select">
-            <option value="">TOUT</option>
-            <option value="T1">T1</option>
-            <option value="T2">T2</option>
-            <option value="T3">T3</option>
-            <option value="T4">T4</option>
-          </select>
-        </div>
-        <div class="filter-card">
-          <div class="f-label">année</div>
-          <select id="rhAnnee" class="rh-select"></select>
-        </div>
-        <div class="filter-card">
-          <div class="f-label">mois</div>
-          <select id="rhMois" class="rh-select"></select>
-        </div>
+/* ============ MODAL ============ */
+#rhModalMask{ position:fixed; inset:0; background:rgba(15,23,42,0.55); display:none; align-items:center; justify-content:center; z-index:9999; backdrop-filter:blur(3px); }
+.rh-modal{ background:#fff; border-radius:18px; padding:0; width:92%; max-width:960px; max-height:85vh; overflow:auto; box-shadow:0 30px 60px rgba(15,23,42,.25); }
+.rh-modal-head{ background:linear-gradient(135deg,#6366F1,#8B5CF6); padding:18px 22px; display:flex; align-items:center; justify-content:space-between; border-radius:18px 18px 0 0; }
+.rh-modal-head > div{ font-weight:900; font-size:14px; color:#fff; text-transform:uppercase; letter-spacing:.4px; }
+.rh-modal-head button{ border:none; background:rgba(255,255,255,.18); color:#fff; padding:7px 14px; border-radius:8px; font-weight:800; cursor:pointer; font-size:11px; text-transform:uppercase; letter-spacing:.3px; transition:background .2s; }
+.rh-modal-head button:hover{ background:rgba(255,255,255,.28); }
+.rh-modal-body{ padding:22px; height:450px; }
+.rh-modal-body canvas{ width:100%!important; height:100%!important; }
+
+#rhHoverTip{ position:absolute; display:none; background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; box-shadow:0 10px 25px rgba(15,23,42,0.15); font-size:13px; color:#1e293b; pointer-events:none; z-index:9998; white-space:nowrap; }
+
+/* SKELETON */
+@keyframes skelPulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spinRh{to{transform:rotate(360deg)}}
+.skel-block{ display:inline-block; width:90px; height:28px; background:#E8EEF6; border-radius:6px; animation:skelPulse 1.2s infinite; }
+.loading-overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.85); border-radius:14px; z-index:10; }
+.loading-overlay .spin{ width:32px; height:32px; border:3px solid #E8EEF6; border-top-color:#8B5CF6; border-radius:50%; animation:spinRh .8s linear infinite; margin:0 auto 10px; }
+.loading-overlay .txt{ font-size:12px; font-weight:800; color:#64748B; text-align:center; }
+
+@media (max-width:900px){ .mass-charts{ grid-template-columns:1fr; } }
+</style>
+
+<div class="rh-wrapper">
+  <div id="rhHoverTip"></div>
+
+  <!-- BANNER DYNAMIQUE -->
+  <div class="rh-banner">
+    <div class="rh-banner-left">
+      <div class="rh-banner-icon"><i class="fas fa-users"></i></div>
+      <div class="rh-banner-text">
+        <div class="rh-banner-title" id="rhBannerTitle">Tableau de bord RH</div>
+        <div class="rh-banner-sub" id="rhBannerSub">Vue d'ensemble — Région Centre</div>
       </div>
     </div>
-
-    <div class="rh-tabs">
-      <button id="rhTabBtnGlobal" class="rh-tab-btn active" onclick="setRhTab('global')">
-        <i class="fas fa-chart-line"></i> Vue Globale RH
-      </button>
-      <button id="rhTabBtnMasse" class="rh-tab-btn" onclick="setRhTab('masse')">
-        <i class="fas fa-money-bill-wave"></i> Masse Salariale vs Budget
-      </button>
-      <button id="rhTabBtnConges" class="rh-tab-btn" onclick="setRhTab('conges')">
-        <i class="fas fa-umbrella-beach"></i> Provision Congés Payés
-      </button>
-    </div>
-
-    <div id="rhPageGlobal" class="rh-page">
-      <div class="kpi-section">
-        <div class="kpi-card b-blue">
-          <div class="kpi-head"><span class="lbl">personnel actif</span><i class="fas fa-user-nurse icon"></i></div>
-          <div class="val" id="kpi-nbpers">--</div>
-          <div class="sub" id="kpi-nbpers-sub">--</div>
-        </div>
-        <div class="kpi-card b-green">
-          <div class="kpi-head"><span class="lbl">recrutements</span><i class="fas fa-user-plus icon"></i></div>
-          <div class="val" style="color:var(--green)" id="kpi-recrut">--</div>
-          <div class="sub" style="color:var(--green)" id="kpi-recrut-sub">--</div>
-        </div>
-        <div class="kpi-card b-red">
-          <div class="kpi-head"><span class="lbl">départs</span><i class="fas fa-user-minus icon"></i></div>
-          <div class="val" style="color:var(--red)" id="kpi-depart">--</div>
-          <div class="sub" style="color:var(--red)" id="kpi-depart-sub">--</div>
-        </div>
-        <div class="kpi-card b-red">
-          <div class="kpi-head"><span class="lbl">taux d'absentéisme</span><i class="fas fa-bed icon"></i></div>
-          <div class="val" style="color:var(--red)" id="kpi-tauxabs">--</div>
-          <div class="sub">source KPIS</div>
-        </div>
-        <div class="kpi-card b-blue">
-          <div class="kpi-head"><span class="lbl">turn over</span><i class="fas fa-sync-alt icon"></i></div>
-          <div class="val" style="color:var(--blue)" id="kpi-turnover2">--</div>
-          <div class="sub">source KPIS</div>
-        </div>
-        <div class="kpi-card b-green">
-          <div class="kpi-head"><span class="lbl">accidents de travail (AT)</span><i class="fas fa-band-aid icon"></i></div>
-          <div class="val" style="color:var(--green)" id="kpi-at">--</div>
-          <div class="sub">cumul période</div>
-        </div>
-        <div class="kpi-card b-red">
-          <div class="kpi-head"><span class="lbl">AES</span><i class="fas fa-syringe icon"></i></div>
-          <div class="val" style="color:var(--red)" id="kpi-aes">--</div>
-          <div class="sub">cumul période</div>
-        </div>
-      </div>
-
-      <div class="charts-section">
-        <div class="chart-box">
-          <div class="chart-header">effectif par catégorie</div>
-          <div id="rhCatList" class="cat-list"></div>
-        </div>
-        <div class="chart-box">
-          <div class="chart-header">flux entrants vs sortants</div>
-          <div class="cv-wrap"><canvas id="chartRhFlux"></canvas></div>
-        </div>
-        <div class="chart-box">
-          <div class="chart-header">parité h/f</div>
-          <div class="cv-wrap"><canvas id="chartRhGenre"></canvas></div>
-        </div>
-      </div>
-
-      <div class="age-section">
-        <div class="chart-header">répartition par âge</div>
-        <div id="rhAgeGrid" class="age-grid"></div>
-      </div>
-
-      <div class="age-section">
-        <div class="chart-header">effectif par type de contrat</div>
-        <div id="rhContratGrid" class="age-grid"></div>
-      </div>
-    </div>
-
-    <div id="rhPageMasse" class="rh-page hidden">
-      <div class="mass-wrap" id="rhMassSection">
-        <div class="mass-left">
-          <div class="mass-kpis">
-            <div class="mini-kpi kpi-budget">
-              <div class="kpi-top"><div class="t">budget</div><div class="kpi-chip" id="kpi-ms-budget-chip">—</div></div>
-              <div id="kpi-ms-budget" class="v">--</div><div class="s" id="kpi-ms-budget-sub">mois</div>
-            </div>
-            <div class="mini-kpi kpi-masse">
-              <div class="kpi-top"><div class="t">masse salariale</div><div class="kpi-chip" id="kpi-ms-real-chip">—</div></div>
-              <div id="kpi-ms-real" class="v">--</div><div class="s" id="kpi-ms-real-sub">mois</div>
-            </div>
-            <div class="mini-kpi kpi-taux">
-              <div class="kpi-top"><div class="t">% réalisation</div><div class="kpi-chip" id="kpi-ms-taux-chip">—</div></div>
-              <div id="kpi-ms-taux" class="v">--</div><div class="s">masse / budget</div>
-            </div>
-            <div class="mini-kpi kpi-vars">
-              <div class="kpi-top"><div class="t">total variables</div><div class="kpi-chip" id="kpi-var-total-chip">—</div></div>
-              <div id="kpi-var-total" class="v">--</div><div class="s">total sans nd</div>
-            </div>
-          </div>
-
-          <div class="mass-charts">
-            <div class="chart-card chart-lg" style="height: 380px;">
-              <div class="chart-title">Masse Salariale vs Budget (MAD)</div>
-              <canvas id="rhChartMasse"></canvas>
-            </div>
-            
-            <div class="rh-masse-detail-card">
-              <div class="rh-masse-detail-head">
-                <div class="rh-masse-detail-title"><span class="rh-zoom-icon">🔍</span><span id="rhMasseDetailTitle">DÉTAIL DU MOIS : —</span></div>
-                <div class="rh-masse-detail-badge" id="rhMasseDetailBadge">—</div>
-              </div>
-              <div class="rh-masse-bars">
-                <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">Actes</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill actes" id="rhBarActes" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValActes">—</div><div class="pct" id="rhPctActes">—</div></div></div>
-                <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">Garde</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill garde" id="rhBarGarde" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValGarde">—</div><div class="pct" id="rhPctGarde">—</div></div></div>
-                <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">DF</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill df" id="rhBarDf" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValDf">—</div><div class="pct" id="rhPctDf">—</div></div></div>
-                <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">Autres</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill autres" id="rhBarAutres" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValAutres">—</div><div class="pct" id="rhPctAutres">—</div></div></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="rhPageConges" class="rh-page hidden">
-      <div class="conges-kpis">
-        <div class="mini-kpi kpi-budget">
-          <div class="kpi-top"><div class="t">nb personnel</div><div class="kpi-chip" id="kpi-conges-mois-chip">—</div></div>
-          <div id="kpi-conges-personnel" class="v">--</div><div class="s">cumul sur la période</div>
-        </div>
-        <div class="mini-kpi kpi-masse">
-          <div class="kpi-top"><div class="t">total jours de congés</div><div class="kpi-chip" id="kpi-conges-jours-chip">—</div></div>
-          <div id="kpi-conges-jours" class="v">--</div><div class="s">jours cumulés</div>
-        </div>
-        <div class="mini-kpi kpi-taux">
-          <div class="kpi-top"><div class="t">provision totale (MAD)</div><div class="kpi-chip" id="kpi-conges-provision-chip">—</div></div>
-          <div id="kpi-conges-provision" class="v">--</div><div class="s">montant provisionné</div>
-        </div>
-        <div class="mini-kpi kpi-vars">
-          <div class="kpi-top"><div class="t">moyenne / personne</div></div>
-          <div id="kpi-conges-moyenne" class="v">--</div><div class="s">provision totale / nb personnel</div>
-        </div>
-      </div>
-
-      <div class="chart-card chart-lg" style="width:100%; height: 380px;">
-        <div class="chart-title">évolution mensuelle de la provision congés payés</div>
-        <canvas id="rhChartConges"></canvas>
-      </div>
-
-      <div class="chart-box">
-        <div class="chart-header">détail par entité — mois sélectionné</div>
-        <table class="table-mini" id="tableCongesDetail">
-          <thead><tr><th>Entité</th><th>Nb personnel</th><th>Total jours</th><th>Provision totale (MAD)</th><th>Provision / personne</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
+    <div class="rh-banner-badge" id="rhBannerBadge">—</div>
   </div>
 
+  <!-- FILTRES UNIFIÉS -->
+  <div class="rh-filters-bar">
+    <div class="filter-card">
+      <div class="f-label">Entité</div>
+      <select id="rhEntite" class="rh-select"></select>
+    </div>
+    <div class="filter-card" id="rhSubEntiteWrap" style="display:none;">
+      <div class="f-label">Sous-entité</div>
+      <select id="rhSousEntite" class="rh-select"></select>
+    </div>
+    <div class="filter-card">
+      <div class="f-label">Année</div>
+      <select id="rhAnnee" class="rh-select"></select>
+    </div>
+    <div class="filter-card">
+      <div class="f-label">Trimestres</div>
+      <div class="ms-wrap" id="rhMultiTri">
+        <button class="ms-trigger" onclick="rhToggleMs('rhMultiTri', event)">
+          <span class="ms-trigger-value" id="rhTriValue">TOUT</span>
+          <span class="ms-chevron">▼</span>
+        </button>
+        <div class="ms-dropdown" id="rhMultiTriDD">
+          <div class="ms-actions">
+            <button onclick="rhMsAll('tri', event)">Tout</button>
+            <button onclick="rhMsNone('tri', event)">Aucun</button>
+          </div>
+          <div class="ms-options" id="rhTriOptions"></div>
+        </div>
+      </div>
+    </div>
+    <div class="filter-card">
+      <div class="f-label">Mois</div>
+      <div class="ms-wrap" id="rhMultiMois">
+        <button class="ms-trigger" onclick="rhToggleMs('rhMultiMois', event)">
+          <span class="ms-trigger-value" id="rhMoisValue">TOUT</span>
+          <span class="ms-chevron">▼</span>
+        </button>
+        <div class="ms-dropdown" id="rhMultiMoisDD">
+          <div class="ms-actions">
+            <button onclick="rhMsAll('mois', event)">Tout</button>
+            <button onclick="rhMsNone('mois', event)">Aucun</button>
+          </div>
+          <div class="ms-options" id="rhMoisOptions"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="rh-tabs">
+    <button id="rhTabBtnGlobal" class="rh-tab-btn active" onclick="setRhTab('global')">Vue Globale RH</button>
+    <button id="rhTabBtnMasse" class="rh-tab-btn" onclick="setRhTab('masse')">Masse Salariale vs Budget</button>
+    <button id="rhTabBtnConges" class="rh-tab-btn" onclick="setRhTab('conges')">Provision Congés Payés</button>
+  </div>
+
+  <!-- PAGE GLOBALE -->
+  <div id="rhPageGlobal" class="rh-page">
+    <div class="kpi-section">
+      <div class="kpi-card b-blue"><div class="kpi-head"><span class="lbl">Personnel actif</span><i class="fas fa-user-nurse icon"></i></div><div class="val" id="kpi-nbpers">--</div><div class="sub" id="kpi-nbpers-sub">--</div></div>
+      <div class="kpi-card b-green"><div class="kpi-head"><span class="lbl">Recrutements</span><i class="fas fa-user-plus icon"></i></div><div class="val" style="color:var(--green)" id="kpi-recrut">--</div><div class="sub" style="color:var(--green)" id="kpi-recrut-sub">--</div></div>
+      <div class="kpi-card b-red"><div class="kpi-head"><span class="lbl">Départs</span><i class="fas fa-user-minus icon"></i></div><div class="val" style="color:var(--red)" id="kpi-depart">--</div><div class="sub" style="color:var(--red)" id="kpi-depart-sub">--</div></div>
+      <div class="kpi-card b-red"><div class="kpi-head"><span class="lbl">Taux d'absentéisme</span><i class="fas fa-bed icon"></i></div><div class="val" style="color:var(--red)" id="kpi-tauxabs">--</div><div class="sub">Source KPIS</div></div>
+      <div class="kpi-card b-blue"><div class="kpi-head"><span class="lbl">Turn Over</span><i class="fas fa-sync-alt icon"></i></div><div class="val" style="color:var(--blue)" id="kpi-turnover2">--</div><div class="sub">Source KPIS</div></div>
+      <div class="kpi-card b-green"><div class="kpi-head"><span class="lbl">Accidents de travail</span><i class="fas fa-band-aid icon"></i></div><div class="val" style="color:var(--green)" id="kpi-at">--</div><div class="sub">Cumul période</div></div>
+      <div class="kpi-card b-red"><div class="kpi-head"><span class="lbl">AES</span><i class="fas fa-syringe icon"></i></div><div class="val" style="color:var(--red)" id="kpi-aes">--</div><div class="sub">Cumul période</div></div>
+    </div>
+    <div class="charts-section">
+      <div class="chart-box"><div class="chart-header"><span class="chart-header-dot"></span>Effectif par catégorie</div><div id="rhCatList" class="cat-list"></div></div>
+      <div class="chart-box"><div class="chart-header"><span class="chart-header-dot" style="background:#10B981"></span>Flux entrants vs sortants</div><div class="cv-wrap"><canvas id="chartRhFlux"></canvas></div></div>
+      <div class="chart-box"><div class="chart-header"><span class="chart-header-dot" style="background:#EC4899"></span>Parité H/F</div><div class="cv-wrap"><canvas id="chartRhGenre"></canvas></div></div>
+    </div>
+    <div class="age-section"><div class="chart-header"><span class="chart-header-dot"></span>Répartition par âge</div><div id="rhAgeGrid" class="age-grid"></div></div>
+    <div class="age-section"><div class="chart-header"><span class="chart-header-dot"></span>Effectif par type de contrat</div><div id="rhContratGrid" class="age-grid"></div></div>
+  </div>
+
+  <!-- PAGE MASSE SALARIALE -->
+  <div id="rhPageMasse" class="rh-page hidden">
+    <div class="mass-wrap">
+      <div class="mass-kpis">
+        <div class="mini-kpi kpi-budget"><div class="kpi-top"><div class="t">Budget</div><div class="kpi-chip" id="kpi-ms-budget-chip">—</div></div><div id="kpi-ms-budget" class="v">--</div><div class="s">MAD</div></div>
+        <div class="mini-kpi kpi-masse"><div class="kpi-top"><div class="t">Masse Salariale</div><div class="kpi-chip" id="kpi-ms-real-chip">—</div></div><div id="kpi-ms-real" class="v">--</div><div class="s">MAD</div></div>
+        <div class="mini-kpi kpi-taux"><div class="kpi-top"><div class="t">% Réalisation</div><div class="kpi-chip" id="kpi-ms-taux-chip">—</div></div><div id="kpi-ms-taux" class="v">--</div><div class="s">Masse / Budget</div></div>
+        <div class="mini-kpi kpi-vars"><div class="kpi-top"><div class="t">Total Variables</div><div class="kpi-chip" id="kpi-var-total-chip">—</div></div><div id="kpi-var-total" class="v">--</div><div class="s">Total sans ND</div></div>
+      </div>
+      <div class="mass-charts">
+        <div class="chart-card" style="height:420px;">
+          <div class="chart-title"><span class="chart-title-dot"></span>Masse Salariale vs Budget (MAD)</div>
+          <div style="height:calc(100% - 28px);"><canvas id="rhChartMasse"></canvas></div>
+        </div>
+        <div class="rh-masse-detail-card">
+          <div class="rh-masse-detail-head">
+            <div class="rh-masse-detail-title" id="rhMasseDetailTitle">DÉTAIL DE LA PÉRIODE</div>
+            <div class="rh-masse-detail-badge" id="rhMasseDetailBadge">—</div>
+          </div>
+          <div class="rh-masse-bars">
+            <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">Actes</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill actes" id="rhBarActes" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValActes">—</div><div class="pct" id="rhPctActes">—</div></div></div>
+            <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">Garde</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill garde" id="rhBarGarde" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValGarde">—</div><div class="pct" id="rhPctGarde">—</div></div></div>
+            <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">DF</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill df" id="rhBarDf" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValDf">—</div><div class="pct" id="rhPctDf">—</div></div></div>
+            <div class="rh-masse-bar-row"><div class="rh-masse-bar-label">Autres</div><div class="rh-masse-bar-track"><div class="rh-masse-bar-fill autres" id="rhBarAutres" style="width:0%"></div></div><div class="rh-masse-bar-val"><div class="amt" id="rhValAutres">—</div><div class="pct" id="rhPctAutres">—</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE CONGES -->
+  <div id="rhPageConges" class="rh-page hidden">
+    <div class="conges-kpis">
+      <div class="mini-kpi kpi-budget"><div class="kpi-top"><div class="t">Nb personnel</div><div class="kpi-chip" id="kpi-conges-mois-chip">—</div></div><div id="kpi-conges-personnel" class="v">--</div><div class="s">Cumul sur la période</div></div>
+      <div class="mini-kpi kpi-masse"><div class="kpi-top"><div class="t">Total jours de congés</div><div class="kpi-chip" id="kpi-conges-jours-chip">—</div></div><div id="kpi-conges-jours" class="v">--</div><div class="s">Jours cumulés</div></div>
+      <div class="mini-kpi kpi-taux"><div class="kpi-top"><div class="t">Provision totale</div><div class="kpi-chip" id="kpi-conges-provision-chip">—</div></div><div id="kpi-conges-provision" class="v">--</div><div class="s">Montant provisionné</div></div>
+    </div>
+    <div class="chart-card" style="width:100%; height:420px;">
+      <div class="chart-title"><span class="chart-title-dot"></span>Évolution mensuelle — Provision Congés Payés</div>
+      <div style="height:calc(100% - 28px); position:relative;"><canvas id="rhChartConges"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-header"><span class="chart-header-dot"></span><span id="congesTableTitle">Détail par entité</span></div>
+      <table class="table-mini" id="tableCongesDetail">
+        <thead><tr id="tableCongesHead"></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- MODAL -->
   <div id="rhModalMask">
     <div class="rh-modal">
-      <div class="rh-modal-head">
-        <div id="rhModalTitle">historique</div>
-        <button id="rhModalClose">fermer</button>
-      </div>
+      <div class="rh-modal-head"><div id="rhModalTitle">Historique</div><button id="rhModalClose">Fermer</button></div>
       <div class="rh-modal-body"><canvas id="rhHistChart"></canvas></div>
     </div>
   </div>
+</div>
 </div>
