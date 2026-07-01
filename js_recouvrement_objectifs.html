@@ -1,7 +1,7 @@
 <script>
 /**
- * MODULE : RECOUVREMENT - FINAL V10
- * Fix: Clic Trimestre -> Détail Organisme
+ * MODULE : RECOUVREMENT - FINAL V11
+ * Fix: Clic Trimestre -> Détail Organisme + Fallback Cache Local + Fix JUIN
  */
 
 var objChartInstance = objChartInstance || null;
@@ -103,45 +103,29 @@ function setupCustomFilters() {
 }
 
 function populateDynamicYearFilter() {
-    // Vérification de sécurité
     if (typeof objRealData === 'undefined' || !objRealData || objRealData.length === 0) return;
-    
     const yearSelect = document.getElementById('recouvFilterAnnee');
     if (!yearSelect) return;
-
-    // 1. Extraire les années uniques des données
     const uniqueYears = [...new Set(objRealData.map(d => d.annee))]
-                        .filter(y => y !== "" && y !== null && y !== undefined) // Enlever les vides
-                        .map(y => parseInt(y)) // S'assurer que ce sont des nombres
-                        .sort((a, b) => b - a); // Trier du plus grand au plus petit (Descendant)
-    
-    // Si la liste est vide ou identique à ce qu'on a déjà (optionnel), on arrête
+                        .filter(y => y !== "" && y !== null && y !== undefined) 
+                        .map(y => parseInt(y)) 
+                        .sort((a, b) => b - a); 
     if (uniqueYears.length === 0) return;
-
-    // 2. Sauvegarder la sélection actuelle pour ne pas la perdre
     const currentSelection = yearSelect.value;
-
-    // 3. Vider et reconstruire la liste
     yearSelect.innerHTML = '<option value="">TOUT</option>';
-    
     uniqueYears.forEach(year => {
         const option = document.createElement('option');
         option.value = year;
         option.textContent = year;
         yearSelect.appendChild(option);
     });
-
-    // 4. Logique de sélection par défaut
     if (currentSelection && uniqueYears.includes(parseInt(currentSelection))) {
-        // Garder la sélection de l'utilisateur si elle existe toujours
         yearSelect.value = currentSelection;
     } else {
-        // Sinon, essayer de sélectionner l'année civile actuelle
         const currentSystemYear = new Date().getFullYear();
         if (uniqueYears.includes(currentSystemYear)) {
             yearSelect.value = currentSystemYear;
         } else {
-            // Sinon, sélectionner l'année la plus récente disponible (la première de la liste triée)
             yearSelect.value = uniqueYears[0];
         }
     }
@@ -308,12 +292,39 @@ window.loadDetailOrgData = function() {
                 }
             }
         }
+        
+        // --- FIX : FALLBACK SI LE BACKEND RETOURNE VIDE ---
+        // Si les onglets "DETAIL EXP" ou "DETAIL REC" sont vides (suite à une erreur d'import BDD),
+        // on utilise les données locales déjà chargées et fonctionnelles !
+        if (detailOrgData.length === 0) {
+            console.warn("Backend vide. Utilisation du cache local (recouvData / expeditionData)");
+            let sourceData = (type === 'EXP') ? expeditionData : recouvData;
+            if (sourceData) {
+                sourceData.forEach(d => {
+                    if (d.dateRefObj && !isNaN(d.dateRefObj.getTime())) {
+                        detailOrgData.push({
+                            entite: d.entite, 
+                            date: d.dateRefObj, 
+                            mois: d.moisRef,
+                            annee: parseInt(d.anneeRef), 
+                            jour: d.dateRefObj.getDate(),
+                            organisme: String(d.organisme || "AUTRE").toUpperCase().trim(), 
+                            montant: Number(d.montant || 0)
+                        });
+                    }
+                });
+            }
+        }
+        
         isOrgDataLoading = false;
         updateObjRealDashboard();
-    }).withFailureHandler(function(err) { isOrgDataLoading = false; }).getDetailsOrganismeData(type);
+    }).withFailureHandler(function(err) { 
+        console.error("Erreur de chargement détails organismes", err); 
+        isOrgDataLoading = false; 
+    }).getDetailsOrganismeData(type);
 };
 
-// --- UPDATE DASHBOARD (CORRIGÉ POUR BOUTON RETOUR) ---
+// --- UPDATE DASHBOARD ---
 window.updateObjRealDashboard = function() {
     injectStylesAndModal();
     setupCustomFilters();
@@ -336,14 +347,8 @@ window.updateObjRealDashboard = function() {
     const drillGroup = document.getElementById('drillButtonsGroup');
     const backBtn = document.getElementById('btnGraphBack');
     
-    // --- MODIFICATION ICI : Condition élargie pour le bouton Retour ---
-    // Affiche le bouton si on a un Mois (drillScope/fMois) OU un Trimestre (fTrim) actif
     const isDrilled = (state.drillScope || fMois || fTrim) ? true : false;
-
-    // Les boutons J/S ne s'affichent que si on est sur un MOIS précis
     if(drillGroup) drillGroup.style.display = (state.drillScope || fMois) ? 'flex' : 'none';
-    
-    // Le bouton Retour s'affiche pour n'importe quel niveau de zoom (Mois ou Trimestre)
     if(backBtn) backBtn.style.display = isDrilled ? 'flex' : 'none';
 
     if (!objRealData) return;
@@ -368,13 +373,11 @@ window.updateObjRealDashboard = function() {
     let monthsInQuarter = [];
     if(fTrim) {
         if(fTrim === 'T1') monthsInQuarter = ['JAN','FEV','MAR'];
-        if(fTrim === 'T2') monthsInQuarter = ['AVR','MAI','JUN']; // 'JUIN' selon vos données
+        if(fTrim === 'T2') monthsInQuarter = ['AVR','MAI','JUIN']; // CORRECTION: JUIN
         if(fTrim === 'T3') monthsInQuarter = ['JUIL','AOU','SEP'];
         if(fTrim === 'T4') monthsInQuarter = ['OCT','NOV','DEC'];
         
         filtered = filtered.filter(d => monthsInQuarter.includes(d.mois));
-        
-        // Note: On ne force pas la vue QUARTER ici pour permettre l'affichage des 3 mois
         state.drillScope = null;
     } else if (fMois) {
         state.drillScope = fMois;
@@ -386,7 +389,7 @@ window.updateObjRealDashboard = function() {
 
     calculateObjKPIs(filtered);
 
-    // Filtrage Données Détail
+    // Filtrage Données Détail Organismes
     let orgFiltered = [];
     if (state.tableMode === 'ORG' || state.tableMode === 'PERIOD') {
         orgFiltered = (detailOrgData || []).filter(function(d) {
@@ -425,7 +428,7 @@ window.updateObjRealDashboard = function() {
     else renderObjTable(filtered);
 };
 
-// --- GRAPHIQUE (AXE Y MASQUÉ) ---
+// --- GRAPHIQUE ---
 function renderObjChart(data) {
     const ctx = document.getElementById('chartObjMain');
     if(!ctx) return;
@@ -446,7 +449,7 @@ function renderObjChart(data) {
 
         if (fTrim) {
             if (fTrim === 'T1') labelList = ['JAN','FEV','MAR'];
-            else if (fTrim === 'T2') labelList = ['AVR','MAI','JUN'];
+            else if (fTrim === 'T2') labelList = ['AVR','MAI','JUIN']; // CORRECTION: JUIN
             else if (fTrim === 'T3') labelList = ['JUIL','AOU','SEP'];
             else if (fTrim === 'T4') labelList = ['OCT','NOV','DEC'];
             if(titleEl) titleEl.innerText = "Détail Trimestre " + fTrim;
@@ -489,7 +492,6 @@ function renderObjChart(data) {
                 responsive:true, maintainAspectRatio:false, layout:{padding:{top:30}},
                 plugins:{ legend:{position:'bottom'}, datalabels:{display:true} },
                 scales:{ 
-                    // MODIFICATION ICI : display: false pour masquer l'axe Y
                     y:{ display: false, grid:{display:false}, ticks:{callback:fmtCompact}, border:{display:false}}, 
                     y1:{position:'right', beginAtZero:true, grid:{display:false}, ticks:{display:false}, border:{display:false}}, 
                     x:{grid:{display:false}, border:{display:false}} 
@@ -573,7 +575,6 @@ function renderObjChart(data) {
                 responsive:true, maintainAspectRatio:false, layout:{padding:{top:25}},
                 plugins:{ legend:{position:'bottom'}, datalabels:{display:true} },
                 scales:{ 
-                    // MODIFICATION ICI : display: false pour masquer l'axe Y
                     y:{ display: false, grid:{display:false}, ticks:{callback:fmtCompact}, border:{display:false}}, 
                     x:{grid:{display:false}, border:{display:false}, ticks:{font:{weight:'600'}}} 
                 },
@@ -685,7 +686,7 @@ function openOrgModal(orgName) {
     let chartData = detailOrgData.filter(d => {
         if (d.organisme !== orgName) return false;
         if (fTrim) {
-             let months = fTrim === 'T1' ? ['JAN','FEV','MAR'] : fTrim === 'T2' ? ['AVR','MAI','JUN'] : fTrim === 'T3' ? ['JUIL','AOU','SEP'] : ['OCT','NOV','DEC'];
+             let months = fTrim === 'T1' ? ['JAN','FEV','MAR'] : fTrim === 'T2' ? ['AVR','MAI','JUIN'] : fTrim === 'T3' ? ['JUIL','AOU','SEP'] : ['OCT','NOV','DEC']; // CORRECTION ICI
              if (!months.includes(d.mois)) return false;
         } else if (state.drillScope) {
              if (d.mois !== state.drillScope) return false;
@@ -717,7 +718,7 @@ function renderOrgEvolutionChart(data) {
     } else {
         const fTrim = document.getElementById('recouvFilterTrim')?.value;
         if (fTrim) {
-             labels = fTrim === 'T1' ? ['JAN','FEV','MAR'] : fTrim === 'T2' ? ['AVR','MAI','JUN'] : fTrim === 'T3' ? ['JUIL','AOU','SEP'] : ['OCT','NOV','DEC'];
+             labels = fTrim === 'T1' ? ['JAN','FEV','MAR'] : fTrim === 'T2' ? ['AVR','MAI','JUIN'] : fTrim === 'T3' ? ['JUIL','AOU','SEP'] : ['OCT','NOV','DEC']; // CORRECTION ICI
         } else {
              labels = REC_MONTHS;
         }
