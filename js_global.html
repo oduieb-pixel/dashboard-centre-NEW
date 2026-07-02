@@ -43,13 +43,14 @@
 // =======================================================================
   //  FONCTION DE SÉCURITÉ RENFORCÉE (Ultra-Strict)
   // =======================================================================
-  window.applyUserPermissions = function(role, entity) {
+  window.applyUserPermissions = function(role, entity, modules) {
       // 1. Contexte
       role = role || (window.currentUserContext ? window.currentUserContext.role : null);
       entity = entity || (window.currentUserContext ? window.currentUserContext.entity : null);
-      window.currentUserContext = { role: role, entity: entity };
+      modules = modules || (window.currentUserContext ? window.currentUserContext.modules : 'ALL');
+      window.currentUserContext = { role: role, entity: entity, modules: modules };
 
-      console.log("🔒 Sécurité | Rôle:", role, "| Entité:", entity);
+      console.log("🔒 Sécurité | Rôle:", role, "| Entité:", entity, "| Modules:", modules);
 
       // =========================================================
       // PARTIE 1 : MASQUAGE DES IMPORTS (Pour NON-ADMIN)
@@ -137,6 +138,50 @@
                   el.style.cursor = "not-allowed";
               }
           });
+      }
+
+      // =========================================================
+      // PARTIE 3 : RESTRICTION PAR MODULE (Colonne H "Modules")
+      // =========================================================
+      // Valeurs acceptées dans la colonne H de la feuille Users, séparées par virgules :
+      // FLASH, BUDGET, RECOUVREMENT, EXPEDITION, DEPENSES, HONORAIRES, RH, ACHAT
+      // Laisser vide ou mettre "ALL" pour donner accès à tous les onglets.
+      if (modules && modules !== 'ALL' && !isAdmin) {
+          const allowedModules = modules.split(',').map(m => m.trim().toUpperCase());
+
+          const tabMapping = {
+              'flash': 'FLASH',
+              'ca-budget': 'BUDGET',
+              'recouvrement': 'RECOUVREMENT',
+              'expedition': 'EXPEDITION',
+              'depenses': 'DEPENSES',
+              'honoraires': 'HONORAIRES',
+              'rh': 'RH',
+              'achat': 'ACHAT'
+          };
+
+          // Masque les boutons de navigation principaux (sidebar desktop + barre mobile)
+          document.querySelectorAll('.slim-nav-item, .mob-nav-item').forEach(btn => {
+              const onclickText = btn.getAttribute('onclick') || '';
+              const match = onclickText.match(/slimSwitchTab\('([^']+)'/);
+              if (match) {
+                  const tabId = match[1];
+                  const moduleKey = tabMapping[tabId];
+                  const hasAccess = !moduleKey || allowedModules.includes(moduleKey);
+                  btn.style.display = hasAccess ? '' : 'none';
+              }
+          });
+
+          // Si l'onglet actif n'est plus autorisé, on bascule sur le premier onglet accessible
+          const activeBtn = document.querySelector('.slim-nav-item.active');
+          const activeHidden = activeBtn && activeBtn.style.display === 'none';
+          if (activeHidden) {
+              const firstAllowed = Array.from(document.querySelectorAll('.slim-nav-item')).find(b => b.style.display !== 'none');
+              if (firstAllowed) {
+                  const m = (firstAllowed.getAttribute('onclick') || '').match(/slimSwitchTab\('([^']+)'/);
+                  if (m && typeof slimSwitchTab === 'function') slimSwitchTab(m[1], firstAllowed);
+              }
+          }
       }
   };
 
@@ -314,6 +359,11 @@ function attemptLogin() {
           if(headerTitle && !document.getElementById('entityBadge')) {
               headerTitle.innerHTML += ` <span id="entityBadge" style="font-size:0.6em; background:rgba(255,255,255,0.2); padding:2px 8px; border-radius:10px; vertical-align:middle;">${entity}</span>`;
           }
+      }
+
+      // C. RESTRICTION PAR MODULE (délègue à applyUserPermissions)
+      if (typeof window.applyUserPermissions === 'function') {
+          window.applyUserPermissions(role, entity, currentUserContext.modules);
       }
   }
 
@@ -885,11 +935,16 @@ function syncFilters(src) {
   //  MOTEUR D'EXPORTATION AVANCÉ
   // =======================================================================
 
-  function applyGlobalFiltersToView(viewId) {
+  function applyGlobalFiltersToView(viewId, applyTimeFilter = true) {
       const gEntite = document.getElementById('entite').value;
-      const gTrim = document.getElementById('trimestre').value;
-      const gMois = document.getElementById('mois').value;
-      const gAnnee = document.getElementById('annee').value;
+      let gTrim = document.getElementById('trimestre').value;
+      let gMois = document.getElementById('mois').value;
+      let gAnnee = document.getElementById('annee').value;
+
+      // Si la case "Chrono" de cette section a été décochée, on ignore la période (export "toutes périodes")
+      if (!applyTimeFilter) {
+          gTrim = ""; gMois = ""; gAnnee = "";
+      }
 
       const setVal = (id, val) => { 
           const el = document.getElementById(id); 
@@ -933,6 +988,13 @@ function syncFilters(src) {
       else { const group = btn.closest('.export-group'); if (group && group.nextElementSibling) group.parentNode.insertBefore(group.nextElementSibling, group); }
   }
 
+  // Coche/décoche toutes les cases "Chrono" d'un groupe (via la case "Chrono Global" de l'en-tête)
+  function toggleGroupChrono(master) {
+      const groupContainer = master.closest('.export-group');
+      const inputs = groupContainer.querySelectorAll('.time-filter-check');
+      inputs.forEach(inp => inp.checked = master.checked);
+  }
+
   function openGlobalExportModal() {
       const modal = document.getElementById('exportModal');
       const container = document.getElementById('exportCheckboxesArea');
@@ -954,6 +1016,12 @@ function syncFilters(src) {
               <div class="export-group-title">
                   <input type="checkbox" class="export-checkbox group-master" data-group="${key}" checked onclick="toggleGroup(this); event.stopPropagation();">
                   <span onclick="toggleGroupList(this.parentNode.parentNode)">${config.title}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap: 15px; margin-right: 15px;">
+                  <label style="font-size: 0.8em; color: #6366f1; cursor: pointer; display: flex; align-items: center; gap: 5px; border: 1px solid #c7d2fe; padding: 4px 8px; border-radius: 5px; background: #eef2ff; font-weight:700;" title="Appliquer le Chrono à tout ce groupe" onclick="event.stopPropagation();">
+                      <input type="checkbox" class="group-time-filter-check" checked style="margin:0; cursor:pointer;" onclick="toggleGroupChrono(this); event.stopPropagation();"> 
+                      <i class="far fa-clock"></i> Chrono Global
+                  </label>
               </div>
               <div class="export-group-controls">
                   <div class="sort-btn" onclick="moveUp(this)" title="Monter Groupe"><i class="fas fa-arrow-up"></i></div>
@@ -977,9 +1045,15 @@ function syncFilters(src) {
                       <input type="checkbox" class="export-checkbox item-check" value="${key}|${originalIndex}" data-title="${item.name}" data-group-ref="${key}" checked>
                       <span>${item.name}</span>
                   </div>
-                  <div class="export-group-controls" style="opacity:0.5; transform:scale(0.8);">
-                      <div class="sort-btn" onclick="moveUp(this)"><i class="fas fa-arrow-up"></i></div>
-                      <div class="sort-btn" onclick="moveDown(this)"><i class="fas fa-arrow-down"></i></div>
+                  <div style="display:flex; align-items:center; gap: 15px;">
+                      <label style="font-size: 0.75em; color: #64748b; cursor: pointer; display: flex; align-items: center; gap: 4px; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; background: #f8fafc;" title="Appliquer le filtre chronologique pour cette sous-partie">
+                          <input type="checkbox" class="time-filter-check" checked style="margin:0; cursor:pointer;"> 
+                          <i class="far fa-clock"></i> Chrono
+                      </label>
+                      <div class="export-group-controls" style="opacity:0.5; transform:scale(0.8);">
+                          <div class="sort-btn" onclick="moveUp(this)"><i class="fas fa-arrow-up"></i></div>
+                          <div class="sort-btn" onclick="moveDown(this)"><i class="fas fa-arrow-down"></i></div>
+                      </div>
                   </div>
               `;
               bodyDiv.appendChild(itemDiv);
@@ -1139,6 +1213,11 @@ function syncFilters(src) {
           const item = config.items[itemIndex];
           const targetEl = document.getElementById(item.captureId || config.targetId);
 
+          // Case "Chrono" de cette ligne : si décochée, on exporte cette section toutes périodes confondues
+          const timeFilterCb = cb.closest('.export-item') ? cb.closest('.export-item').querySelector('.time-filter-check') : null;
+          const applyTimeFilter = timeFilterCb ? timeFilterCb.checked : true;
+          const itemPeriodText = applyTimeFilter ? periodName : "Toutes périodes";
+
           if (includeSeparators && groupKey !== lastGroupKey) {
               if (format === 'pdf') {
                   pdf.addPage();
@@ -1158,7 +1237,7 @@ function syncFilters(src) {
           const parentView = targetEl.closest('.view-section') || targetEl;
           parentView.classList.add('active'); parentView.style.display = 'block';
           
-          applyGlobalFiltersToView(config.targetId);
+          applyGlobalFiltersToView(config.targetId, applyTimeFilter);
           if (item.action) item.action();
 
           const elsToHide = [];
@@ -1188,7 +1267,7 @@ function syncFilters(src) {
                   pdf.setTextColor(54, 55, 149); pdf.setFontSize(10); pdf.setFont("helvetica", "bold");
                   pdf.text(`${config.title} > ${item.name}`, 10, 8);
                   pdf.setTextColor(100, 100, 100); pdf.setFontSize(10); pdf.setFont("helvetica", "normal");
-                  pdf.text(`${entiteName} | ${periodName}`, w - 60, 8);
+                  pdf.text(`${entiteName} | ${itemPeriodText}`, w - 60, 8);
 
                   const imgProps = pdf.getImageProperties(imgData);
                   

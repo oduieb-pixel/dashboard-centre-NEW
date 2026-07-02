@@ -163,7 +163,7 @@ function updateExpensesView() {
     const countOps = currentFilteredData.length;
     
     safeSetText('kpiDepenseTotal', formatMoney(total) + " DH");
-    safeSetText('kpiVolTotal', countOps);
+    safeSetText('kpiVolTotal', formatValue(countOps));
     
     const nbMois = targetMonths.length || 1;
     const avgTicket = countOps > 0 ? total / countOps : 0;

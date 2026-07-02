@@ -101,10 +101,15 @@ function loadRecouvData() {
             }
         }).getObjRealDashboardData();
 
-        // NOUVEAU : Traitement des Dossiers non soldés
+        // Dossiers non soldés
         google.script.run.withSuccessHandler(response => {
             if (response && response.data) {
                 if (response.lastUpdate) lastUpdateNonSoldes = response.lastUpdate;
+
+                // Sauvegarde des listes globales pour le bouton Top Insolvables
+                window.multiEntityPatientsList = response.multiEntityPatients || [];
+                window.insolvablesRegionList = response.insolvablesRegion || [];
+
                 let rawNonSoldes = processBackendData(response.data, 'NON_SOLDES');
                 nonSoldesData = postProcessNonSoldes(rawNonSoldes);
                 if (currentSubFamily === 'Dossiers non soldés') {
@@ -226,12 +231,13 @@ function processBackendData(rawData, type) {
         if (idSejour) {
             let domainExt = "";
             let eUp = entite.toUpperCase();
-            if (eUp.includes("HIA") || eUp.includes("CIOA")) domainExt = ".hia";
-            else if (eUp.includes("CIT")) domainExt = ".cit";
-            else if (eUp.includes("CID")) domainExt = ".cid";
-            else if (eUp.includes("HPG")) domainExt = ".hpg";
-            else if (eUp.includes("PIL")) domainExt = ".pil";
-            else if (eUp.includes("HIKMA") || eUp.includes("CAH")) domainExt = ".cah";
+            // ⚠️ À ADAPTER : mets ici les vrais sous-domaines Visionhis de tes entités Région Centre.
+            if (eUp.includes("HIIN")) domainExt = ".hiin";
+            else if (eUp.includes("CSS") || eUp.includes("CCS")) domainExt = ".css";
+            else if (eUp.includes("CIOB") || eUp.includes("CIDB")) domainExt = ".ciob";
+            else if (eUp.includes("CIMO")) domainExt = ".cimo";
+            else if (eUp.includes("HPB")) domainExt = ".hpb";
+            else if (eUp.includes("CIK")) domainExt = ".cik";
             if (domainExt) extranetLink = "http://visionhis" + domainExt + "/visionhis/index.php?m=dPfact&tab=vw_cotation&fact_sejour_id=" + idSejour;
         }
         
@@ -733,7 +739,7 @@ function toggleFilters(mode) {
         'rowAlertsRecouv', 'rowAlertsExped', 'rowAlertsNonSoldes', 
         'blockClassifNature', 'blockClassifOrg', 'filterMotifContainer', 
         'filterEtatContainer', 'filterOrganismeContainer',
-        'nonSoldesDynamicHeader'
+        'nonSoldesDynamicHeader', 'btnInsolvablesContainer'
     ];
     ids.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
 
@@ -745,6 +751,9 @@ function toggleFilters(mode) {
     } else if (mode === 'NON_SOLDES') {
         const dynHead = document.getElementById('nonSoldesDynamicHeader');
         if (dynHead) dynHead.style.display = 'block';
+
+        const btnInsolv = document.getElementById('btnInsolvablesContainer');
+        if (btnInsolv) btnInsolv.style.display = 'block';
 
         if (!document.getElementById('nonSoldesCustomFilters')) {
             const filterRow = document.getElementById('recouvFilterRow');
@@ -1897,7 +1906,7 @@ window.openRecouvDetailCustom = function(dataset, title) {
     }
 
     safeSetText('recouvDetailTotal', formatMoney(total) + " DH"); 
-    safeSetText('recouvDetailCount', dataset.length); 
+    safeSetText('recouvDetailCount', formatValue(dataset.length)); 
     
     if(modal) modal.style.display = 'flex'; 
 };

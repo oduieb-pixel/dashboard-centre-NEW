@@ -29,7 +29,7 @@ function renderRetoursView(dataSet) {
 
     const total = finalData.reduce((s,d)=>s+d.montant,0);
     safeSetText('kpiRecouvMontant', formatMoney(total) + " DH");
-    safeSetText('kpiRecouvCount', finalData.length);
+    safeSetText('kpiRecouvCount', formatValue(finalData.length));
     
     // KPI Carte Bleue (Top Motifs)
     safeSetHTML('kpiCard4Title', "TOP 3 MOTIFS RÉCURRENTS");

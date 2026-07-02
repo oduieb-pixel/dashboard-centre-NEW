@@ -57,22 +57,32 @@ function onOpen() {
 // =======================================================================
 
 function getDashboardData() {
+  const user = getUserContext();
+  const userEntity = user.entity;
+  const extra = getExtraData();
+
+  const capacityFiltered = {};
+  Object.keys(extra.capacity).forEach(function(k) {
+    var ent = k.split('_')[0];
+    if (entityMatchesUser_(ent, userEntity)) capacityFiltered[k] = extra.capacity[k];
+  });
+
   const rawData = { 
-    normalizedData: getNormalizedData(),
-    contactData: getExtraData().contact,
-    caData: getExtraData().ca,
-    capacity: getExtraData().capacity
+    normalizedData: filterRowsByEntity_(getNormalizedData(), 0, userEntity),
+    contactData: filterKeyedByEntity_(extra.contact, userEntity),
+    caData: filterKeyedByEntity_(extra.ca, userEntity),
+    capacity: capacityFiltered
   };
 
   return { 
     ...rawData, 
     userContext: { 
-      email: Session.getActiveUser().getEmail(), 
-      hasAccess: true, 
-      role: 'ADMIN', 
-      entity: 'ALL',
-      poste: 'Contrôleur de Gestion',
-      photo: ''
+      email: user.email, 
+      hasAccess: user.hasAccess, 
+      role: user.role, 
+      entity: user.entity,
+      poste: user.poste,
+      photo: user.photo
     } 
   };
 }
@@ -344,6 +354,7 @@ function saveExpensesData(cleanData) {
 }
 
 function getExpensesDashboardData() {
+  const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("DEPENSES");
   const lastUpdate = PropertiesService.getScriptProperties().getProperty('LAST_DEPENSE_UPDATE') || "--/--/----";
@@ -351,7 +362,7 @@ function getExpensesDashboardData() {
   if (!sheet) return { data: [], lastUpdate: lastUpdate }; 
   
   const rawData = sheet.getDataRange().getValues();
-  return { data: rawData, lastUpdate: lastUpdate };
+  return { data: filterRowsByEntity_(rawData, 0, user.entity), lastUpdate: lastUpdate };
 }
 
 // =======================================================================
@@ -426,6 +437,7 @@ function saveRecouvFocusData(cleanData) {
 }
 
 function getRecouvFocusData() {
+  const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let lastUpdate = "--/--/----";
   try {
@@ -437,7 +449,7 @@ function getRecouvFocusData() {
     const sheet = ss.getSheetByName("RECOUV_FOCUS");
     if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
     const rawData = sheet.getDataRange().getValues();
-    return { data: rawData, lastUpdate: lastUpdate };
+    return { data: filterRowsByEntity_(rawData, 0, user.entity), lastUpdate: lastUpdate };
   } catch (e) {
     return { data: [], lastUpdate: lastUpdate };
   }
@@ -501,6 +513,7 @@ function saveExpeditionData(cleanData) {
 }
 
 function getExpeditionData() {
+  const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let lastUpdate = "--/--/----";
   try { 
@@ -511,7 +524,7 @@ function getExpeditionData() {
   if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
   
   const rawData = sheet.getDataRange().getValues();
-  return { data: rawData, lastUpdate: lastUpdate };
+  return { data: filterRowsByEntity_(rawData, 0, user.entity), lastUpdate: lastUpdate };
 }
 
 // =======================================================================
@@ -591,7 +604,7 @@ function getSuiviRetoursData() {
     }
   });
 
-  return compiledData;
+  return filterObjectsByEntity_(compiledData, 'entite', getUserContext().entity);
 }
 
 function letterToColumn(letter) {
@@ -705,10 +718,12 @@ function importObjRealData() {
 }
 
 function getObjRealDashboardData() {
+  const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("OBJ_REAL_DATA");
   if (!sheet) return [];
-  return sheet.getDataRange().getValues();
+  const rawData = sheet.getDataRange().getValues();
+  return filterRowsByEntity_(rawData, 4, user.entity);
 }
 
 // =======================================================================
@@ -863,6 +878,7 @@ function consoliderHonoraires() {
 
 // 2. Fonction qui lit les données DIRECTEMENT depuis les fichiers sans les stocker dans le tableur principal
 function getHonorairesData() {
+  const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const indexSheet = ss.getSheetByName("DB_INDEX");
   
@@ -885,6 +901,10 @@ function getHonorairesData() {
 
   // Aspire tous les fichiers à la volée (en mémoire)
   for (let i = 0; i < sources.length; i++) {
+    const srcEntite = sources[i][0];
+    // SÉCURITÉ : on ne lit même pas le fichier d'une entité non autorisée
+    if (!entityMatchesUser_(srcEntite, user.entity)) continue;
+
     const id = sources[i][2];
     const updateDate = sources[i][4]; // Date de mise à jour dans DB_INDEX
     
@@ -976,6 +996,7 @@ function saveNonSoldesData(cleanData) {
 }
 
 function getNonSoldesData() {
+  const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let lastUpdate = "--/--/----";
   try { 
@@ -983,10 +1004,41 @@ function getNonSoldesData() {
   } catch(e) {}
 
   const sheet = ss.getSheetByName("NON_SOLDE_FOCUS");
-  if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
+  if (!sheet || sheet.getLastRow() < 2) return { data: [], multiEntityPatients: [], insolvablesRegion: [], lastUpdate: lastUpdate };
   
   const rawData = sheet.getDataRange().getValues();
-  return { data: rawData, lastUpdate: lastUpdate };
+
+  // ========================================================
+  // CALCUL AVANT FILTRAGE (Multi-entité + Insolvables Région)
+  // ========================================================
+  const patientStats = {};
+  rawData.slice(1).forEach(row => {
+    const ent = String(row[0]).trim();
+    const pat = String(row[3]).trim().toUpperCase(); // Colonne D : Patient
+    const resteVal = row[12]; // Colonne M : Reste à payer
+    let reste = 0;
+    if (typeof resteVal === 'number') { reste = resteVal; }
+    else { reste = parseFloat(String(resteVal).replace(/[\s,]/g, (m) => m === ',' ? '.' : '')) || 0; }
+    if (pat && reste > 0) {
+      if (!patientStats[pat]) patientStats[pat] = { entites: new Set(), totalReste: 0 };
+      patientStats[pat].entites.add(ent);
+      patientStats[pat].totalReste += reste;
+    }
+  });
+
+  // 1. Liste des patients présents dans plus d'une entité (juste des noms, pas de montant : safe pour tous)
+  const multiEntityPatients = Object.keys(patientStats).filter(pat => patientStats[pat].entites.size > 1);
+
+  // 2. Classement régional complet (Top 100) : SÉCURITÉ -> réservé aux comptes ayant accès à toute la région (entity === 'ALL')
+  let insolvablesRegion = [];
+  if (user.entity === 'ALL') {
+    insolvablesRegion = Object.keys(patientStats)
+      .map(pat => ({ patient: pat, reste: patientStats[pat].totalReste, entites: Array.from(patientStats[pat].entites).join(' / ') }))
+      .sort((a, b) => b.reste - a.reste)
+      .slice(0, 100);
+  }
+
+  return { data: filterRowsByEntity_(rawData, 0, user.entity), multiEntityPatients: multiEntityPatients, insolvablesRegion: insolvablesRegion, lastUpdate: lastUpdate };
 }
 
 // =======================================================================
@@ -2607,14 +2659,63 @@ function getAchatData() {
 const SECURITY_DB_ID = '1EImVCSXRLHK6X4agSFguvctgUtiwgO519VBHZtaMod8';
 function getSecurityDb() { return SpreadsheetApp.openById(SECURITY_DB_ID); }
 
+// =======================================================================
+// SÉCURITÉ - FILTRAGE DES DONNÉES PAR ENTITÉ (VIEWER_ENTITY)
+// =======================================================================
+// Certains modules utilisent des codes différents pour la même entité
+// physique selon leur source (ex: Recouvrement/Achat utilisent "CCS" et
+// "CIDB" alors que Flash/Budget/Dépenses utilisent "CSS" et "CIOB").
+// Cette table regroupe tous les alias connus sous le code canonique
+// (celui qui doit être stocké dans la colonne "Entity" du sheet Users).
+const ENTITY_ALIASES = {
+  "CSS":  ["CSS", "CCS", "CCSS"],
+  "CIOB": ["CIOB", "CIDB"],
+  "CIMO": ["CIMO", "CIMOG"],
+  "HIIN": ["HIIN"],
+  "HPB":  ["HPB", "HPBM"],
+  "CIK":  ["CIK"]
+};
+
+// Est-ce que le code d'entité d'une ligne correspond à l'entité de l'utilisateur ?
+function entityMatchesUser_(rowEntite, userEntity) {
+  if (!userEntity || userEntity === 'ALL') return true;
+  var u = String(userEntity).trim().toUpperCase();
+  var r = String(rowEntite || '').trim().toUpperCase();
+  if (r === u) return true;
+  var aliases = ENTITY_ALIASES[u] || [u];
+  return aliases.indexOf(r) > -1;
+}
+
+// Filtre un tableau 2D [header, ...rows] sur la colonne d'index colIdx
+function filterRowsByEntity_(rawData, colIdx, userEntity) {
+  if (!rawData || rawData.length < 2 || !userEntity || userEntity === 'ALL') return rawData;
+  var header = rawData[0];
+  var rows = rawData.slice(1).filter(function(row) { return entityMatchesUser_(row[colIdx], userEntity); });
+  return [header].concat(rows);
+}
+
+// Filtre un tableau d'objets sur une propriété donnée (ex: 'entite', 'site')
+function filterObjectsByEntity_(arr, propName, userEntity) {
+  if (!arr || !userEntity || userEntity === 'ALL') return arr;
+  return arr.filter(function(o) { return entityMatchesUser_(o[propName], userEntity); });
+}
+
+// Filtre un objet { "ENTITE": {...} } sur ses clés
+function filterKeyedByEntity_(obj, userEntity) {
+  if (!obj || !userEntity || userEntity === 'ALL') return obj;
+  var out = {};
+  Object.keys(obj).forEach(function(k) { if (entityMatchesUser_(k, userEntity)) out[k] = obj[k]; });
+  return out;
+}
+
 function getUserContext() {
   var email = Session.getActiveUser().getEmail().toLowerCase();
   var data  = getSecurityDb().getSheetByName('Users').getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][2]).toLowerCase() === email)
-      return { email:email, hasAccess:true, role:data[i][3], entity:data[i][4], poste:data[i][5]||'', photo:data[i][6]||'' };
+      return { email:email, hasAccess:true, role:data[i][3], entity:data[i][4], poste:data[i][5]||'', photo:data[i][6]||'', modules:data[i][7]||'ALL' };
   }
-  return { email:email, hasAccess:false, role:'NONE', entity:'NONE', poste:'', photo:'' };
+  return { email:email, hasAccess:false, role:'NONE', entity:'NONE', poste:'', photo:'', modules:'NONE' };
 }
 
 function verifyCustomLogin(username, password, clientIp) {
@@ -2622,29 +2723,55 @@ function verifyCustomLogin(username, password, clientIp) {
   var logSheet  = getSecurityDb().getSheetByName('Logs_ESG');
   var data = userSheet.getDataRange().getValues();
   username = String(username).trim().toLowerCase();
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm:ss');
+
+  // RÈGLE DE SÉCURITÉ N°1 : le username saisi doit correspondre au compte Google
+  // réellement connecté (empêche de se connecter avec l'identifiant de quelqu'un d'autre).
+  var activeEmail = Session.getActiveUser().getEmail().toLowerCase();
+  var emailPrefix = activeEmail.split('@')[0];
+  if (activeEmail && username !== emailPrefix) {
+    logSheet.appendRow([now, username, clientIp, 'FAIL', 'LOGIN', 'Incohérence compte Google (' + activeEmail + ')']);
+    return { success:false, message:"Sécurité : l'identifiant '" + username + "' ne correspond pas au compte Google connecté (" + activeEmail + ")." };
+  }
+
   var user = null;
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]).toLowerCase() === username) {
-      user = { pass:data[i][1], email:String(data[i][2]).toLowerCase(), role:data[i][3], entity:data[i][4], poste:data[i][5]||'', photo:data[i][6]||'' };
+      user = { pass:data[i][1], email:String(data[i][2]).toLowerCase(), role:data[i][3], entity:data[i][4], poste:data[i][5]||'', photo:data[i][6]||'', modules:data[i][7]||'ALL' };
       break;
     }
   }
-  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm:ss');
   if (!user) { logSheet.appendRow([now, username, clientIp, 'FAIL', 'LOGIN', 'Utilisateur non trouvé']); return { success:false, message:'Identifiant ou mot de passe incorrect' }; }
   if (String(user.pass) !== String(password)) { logSheet.appendRow([now, username, clientIp, 'FAIL', 'LOGIN', 'Mot de passe incorrect']); return { success:false, message:'Identifiant ou mot de passe incorrect' }; }
   logSheet.appendRow([now, username, clientIp, 'SUCCESS', 'LOGIN', 'Connexion réussie']);
-  return { success:true, username:username, email:user.email, role:user.role, entity:user.entity, poste:user.poste, photo:user.photo };
+  return { success:true, username:username, email:user.email, role:user.role, entity:user.entity, poste:user.poste, photo:user.photo, modules:user.modules };
 }
 
 function resetUserPassword(email) {
-  var data = getSecurityDb().getSheetByName('Users').getDataRange().getValues();
+  var ss = getSecurityDb();
+  var userSheet = ss.getSheetByName('Users');
+  var logSheet = ss.getSheetByName('Logs_ESG');
+  var data = userSheet.getDataRange().getValues();
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm:ss');
+
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][2]).toLowerCase() === email.toLowerCase()) {
-      GmailApp.sendEmail(email, 'AKDITAL - Réinitialisation mot de passe', 'Contactez votre administrateur pour réinitialiser votre mot de passe.');
-      return { success:true, message:'Email envoyé. Vérifiez votre boîte de réception.' };
+    if (String(data[i][2]).toLowerCase() === email.trim().toLowerCase()) {
+      var newPass = Math.random().toString(36).slice(-8).toUpperCase();
+      userSheet.getRange(i + 1, 2).setValue(newPass);
+
+      try {
+        GmailApp.sendEmail(email, 'AKDITAL Dashboard - Réinitialisation du mot de passe',
+          "Bonjour,\n\nVotre nouveau mot de passe temporaire est : " + newPass +
+          "\n\nMerci de le modifier dès votre prochaine connexion.\n\nCordialement.");
+        if (logSheet) logSheet.appendRow([now, data[i][0], 'SYSTEM', 'RESET_PASS', 'SUCCESS', 'Email envoyé à ' + email]);
+      } catch (e) {
+        return { success:false, message:'Erreur technique lors de l\'envoi de l\'email.' };
+      }
+      // Message générique par sécurité (ne pas confirmer explicitement l'existence du compte)
+      return { success:true, message:'Si cet email existe dans la base, un nouveau mot de passe vient de lui être envoyé.' };
     }
   }
-  return { success:false, message:'Email non trouvé.' };
+  return { success:true, message:'Si cet email existe dans la base, un nouveau mot de passe vient de lui être envoyé.' };
 }
 
 function changeUserPassword(username, oldPass, newPass, clientIp) {
@@ -2815,10 +2942,21 @@ function calcObjAchat(rows2025){
 }
 
 function getAchatData(){
+  var user = getUserContext();
   try{
     var cache=CacheService.getScriptCache();
     var cached=cache.get(ACHAT_CACHE_KEY);
-    if(cached){try{var p=JSON.parse(cached);p.fromCache=true;return p;}catch(e){}}
+    if(cached){
+      try{
+        var p=JSON.parse(cached);
+        p.fromCache=true;
+        // SÉCURITÉ : le cache contient TOUTES les entités, on filtre juste avant l'envoi
+        p.data      = filterObjectsByEntity_(p.data, 'site', user.entity);
+        p.data2025  = filterObjectsByEntity_(p.data2025, 'site', user.entity);
+        p.objectifs = filterObjectsByEntity_(p.objectifs, 'site', user.entity);
+        return p;
+      }catch(e){}
+    }
 
     var today=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm');
     var d2026=readBddCnd('BDD_CND_APP',     2026);
@@ -2828,6 +2966,7 @@ function getAchatData(){
     var result={data:d2026,data2025:d2025,objectifs:objectifs,lastUpdate:today,fromCache:false};
 
     try{
+      // On met en cache la version COMPLÈTE (non filtrée), pour tous les utilisateurs
       var json=JSON.stringify(result);
       if(json.length<95000){cache.put(ACHAT_CACHE_KEY,json,ACHAT_CACHE_SEC);}
       else{
@@ -2837,7 +2976,15 @@ function getAchatData(){
       }
     }catch(e){Logger.log('Cache write: '+e.message);}
 
-    return result;
+    // SÉCURITÉ : filtrage appliqué juste avant l'envoi, jamais dans le cache
+    return {
+      data: filterObjectsByEntity_(result.data, 'site', user.entity),
+      data2025: filterObjectsByEntity_(result.data2025, 'site', user.entity),
+      objectifs: filterObjectsByEntity_(result.objectifs, 'site', user.entity),
+      lastUpdate: result.lastUpdate,
+      fromCache: result.fromCache,
+      truncated: result.truncated || false
+    };
   }catch(e){
     Logger.log('getAchatData error: '+e.message);
     return{data:[],data2025:[],objectifs:[],lastUpdate:'Erreur',error:e.message};

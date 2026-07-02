@@ -17,7 +17,7 @@ function renderExpeditionView(dataSet) {
     // --- KPIs ---
     const total = finalData.reduce((s,d)=>s+d.montant,0);
     safeSetText('kpiRecouvMontant', formatMoney(total) + " DH");
-    safeSetText('kpiRecouvCount', finalData.length);
+    safeSetText('kpiRecouvCount', formatValue(finalData.length));
 
     updateExpeditionDelays(finalData, fPatient);
 
@@ -77,10 +77,10 @@ function updateExpeditionDelays(data, filterPatient) {
         else { dSup += d.montant; nSup++; }
     });
 
-    safeSetText('kpiExped30_Mt', formatMoney(d30)); safeSetText('kpiExped30_Nb', n30);
-    safeSetText('kpiExped60_Mt', formatMoney(d60)); safeSetText('kpiExped60_Nb', n60);
-    safeSetText('kpiExped90_Mt', formatMoney(d90)); safeSetText('kpiExped90_Nb', n90);
-    safeSetText('kpiExpedSup_Mt', formatMoney(dSup)); safeSetText('kpiExpedSup_Nb', nSup);
+    safeSetText('kpiExped30_Mt', formatMoney(d30)); safeSetText('kpiExped30_Nb', formatValue(n30));
+    safeSetText('kpiExped60_Mt', formatMoney(d60)); safeSetText('kpiExped60_Nb', formatValue(n60));
+    safeSetText('kpiExped90_Mt', formatMoney(d90)); safeSetText('kpiExped90_Nb', formatValue(n90));
+    safeSetText('kpiExpedSup_Mt', formatMoney(dSup)); safeSetText('kpiExpedSup_Nb', formatValue(nSup));
 }
 
 function updateExpeditionHeader(fPatient) {

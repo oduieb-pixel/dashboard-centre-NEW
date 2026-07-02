@@ -24,15 +24,15 @@ function renderNonReglesView(dataSet) {
     // 2. Mise à jour KPIs Globaux
     const total = finalData.reduce((s,d)=>s+d.montant,0);
     safeSetText('kpiRecouvMontant', formatMoney(total) + " DH");
-    safeSetText('kpiRecouvCount', finalData.length);
+    safeSetText('kpiRecouvCount', formatValue(finalData.length));
 
     // 3. KPIs Alertes
     const echues = finalData.filter(d=>d.isEchue);
     const nonEchues = finalData.filter(d=>!d.isEchue);
     safeSetText('kpiEchueMontant', formatMoney(echues.reduce((s,d)=>s+d.montant,0)) + " DH"); 
-    safeSetText('kpiEchueCount', echues.length);
+    safeSetText('kpiEchueCount', formatValue(echues.length));
     safeSetText('kpiNonEchueMontant', formatMoney(nonEchues.reduce((s,d)=>s+d.montant,0)) + " DH"); 
-    safeSetText('kpiNonEchueCount', nonEchues.length);
+    safeSetText('kpiNonEchueCount', formatValue(nonEchues.length));
 
     // 4. KPI Carte Bleue (PROCHE ÉCHÉANCE)
     // CORRECTION ICI : Ajout du "=" (>= -15) pour correspondre au filtre principal

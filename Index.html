@@ -642,6 +642,18 @@
         error.innerHTML = '<i class="fas fa-exclamation-circle"></i> Veuillez remplir tous les champs';
         error.style.display = 'flex'; return;
       }
+
+      // Sécurité : le login saisi doit correspondre au compte Google détecté
+      var detectedEmailEl = document.getElementById('detectedEmail');
+      var detectedEmail = detectedEmailEl ? detectedEmailEl.value.trim().toLowerCase() : '';
+      if (detectedEmail) {
+        var prefix = detectedEmail.split('@')[0];
+        if (username.toLowerCase() !== prefix) {
+          error.innerHTML = '<i class="fas fa-shield-alt"></i> Sécurité : l\'identifiant "' + username + '" ne correspond pas au compte Google connecté (' + prefix + ').';
+          error.style.display = 'flex'; return;
+        }
+      }
+
       error.style.display = 'none';
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Vérification...';
@@ -654,7 +666,7 @@
           if (res.success) {
             // Stocker le contexte
             window.currentUserContext = {
-              role: res.role, entity: res.entity,
+              role: res.role, entity: res.entity, modules: res.modules,
               username: res.username, email: res.email,
               poste: res.poste, photo: res.photo
             };
@@ -666,7 +678,7 @@
             el = document.getElementById('connectedUserPhoto');  if (el) el.src = photo;
             el = document.getElementById('topbarUserPhoto');     if (el) el.src = photo;
 
-            if (typeof applyUserPermissions === 'function') applyUserPermissions(res.role, res.entity);
+            if (typeof applyUserPermissions === 'function') applyUserPermissions(res.role, res.entity, res.modules);
 
             // Fermer le login
             var overlay = document.getElementById('loginOverlay');
