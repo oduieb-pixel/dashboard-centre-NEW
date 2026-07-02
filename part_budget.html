@@ -27,12 +27,27 @@
         </div>
 
         <div style="flex-grow: 1; display: flex; flex-direction: column; overflow-y: auto; background: white;">
-            <div style="padding: 20px 30px; border-bottom: 1px solid #f0f0f0; border-top: 4px solid #6366f1; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap:wrap; gap:15px;">
-                <div>
-                    <h2 id="ctxBudgetTitle" style="margin: 0; font-size: 1.5em; color: #333; font-weight: 700;">Vue Globale</h2>
-                    <span id="ctxBudgetSubtitle" style="color: #888; font-size: 0.9em; font-weight: 500;">-</span>
+            <div style="background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 100%); border-radius:16px; padding:20px 26px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; box-shadow:0 10px 28px rgba(99,102,241,.22); position:relative; overflow:hidden; margin-bottom:18px;">
+                <div style="position:absolute; right:-40px; top:-40px; width:200px; height:200px; border-radius:50%; background:rgba(255,255,255,.07);"></div>
+                <div style="position:absolute; right:60px; bottom:-30px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.05);"></div>
+                <div style="display:flex; align-items:center; gap:16px; position:relative; z-index:1;">
+                    <div style="width:46px; height:46px; border-radius:12px; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.22); display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px;">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:3px;">
+                        <h2 id="ctxBudgetTitle" style="margin: 0; color: #fff; font-size: 16px; font-weight: 900; letter-spacing:0.4px; text-transform:uppercase;">CA vs Budget</h2>
+                        <span id="ctxBudgetSubtitle" style="color: rgba(255,255,255,.78); font-size: 12px; font-weight: 700;">-</span>
+                    </div>
                 </div>
-                <div id="secondaryFiltersPanel" style="background: transparent; box-shadow: none; padding: 0; margin: 0; gap: 15px; display:flex; align-items: flex-end;">
+            </div>
+
+            <style>
+            .modern-filter-box-budget { background: #fff !important; padding: 16px 20px !important; margin-bottom: 20px !important; border-radius: 12px !important; box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important; border: 1px solid #e1e8ed !important; border-top: 4px solid #6366f1 !important; border-left: none !important; display: flex !important; justify-content: flex-end !important; align-items: flex-end !important; flex-wrap: wrap !important; gap: 15px !important; }
+            #view-ca-budget #secondaryFiltersPanel { background: transparent !important; box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; gap: 15px !important; display: flex !important; align-items: flex-end !important; }
+            </style>
+            
+            <div class="modern-filter-box-budget">
+                <div id="secondaryFiltersPanel">
                     <div class="sec-filter-group">
                         <label>Entité</label>
                         <select id="localBudgetEntite" onchange="syncBudgetFilters('entite')"></select>
