@@ -1,27 +1,34 @@
 <div id="view-depenses" class="view-section export-section" data-export-title="Dépenses Caisses">
     
-    <div style="background: white; padding: 20px; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); border-left: 5px solid #363795;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; margin-bottom:10px;">
-            <div>
-                <h2 style="margin: 0; color: #2c3e50; font-size: 1.6em; font-weight: 800; letter-spacing:-0.5px;">DÉPENSES CAISSES</h2>
-                <div id="depenseLastUpdate" style="font-size: 0.8em; color: #888; font-style: italic; margin-top: 4px;">
-                    Date d'actualisation des données : --/--/----
-                </div>
-                <div id="filterDisplay" style="color: #363795; font-size: 0.95em; margin-top: 5px; font-weight:500;">
-                    Chargement...
-                </div>
+    <div style="background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 100%); border-radius:16px; padding:20px 26px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; box-shadow:0 10px 28px rgba(99,102,241,.22); position:relative; overflow:hidden; margin-bottom:18px;">
+        <div style="position:absolute; right:-40px; top:-40px; width:200px; height:200px; border-radius:50%; background:rgba(255,255,255,.07);"></div>
+        <div style="position:absolute; right:60px; bottom:-30px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.05);"></div>
+        
+        <div style="display:flex; align-items:center; gap:16px; position:relative; z-index:1;">
+            <div style="width:46px; height:46px; border-radius:12px; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.22); display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px;">
+                <i class="fas fa-wallet"></i>
             </div>
-            
-            <div style="background: #f8f9fa; padding: 8px 15px; border-radius: 50px; border: 1px dashed #cbd5e0; display: flex; align-items: center; gap: 10px;">
-                <input type="file" id="fileExpenses" accept=".xlsx, .xls" multiple style="display:none;" onchange="window.handleFileSelect(event)">
-                <button class="action-btn" onclick="document.getElementById('fileExpenses').click()" style="background:#363795; color:white; border-radius:20px; padding:8px 20px; font-size:0.85em; cursor:pointer; border:none; box-shadow:0 3px 6px rgba(0,0,0,0.1);">
-                    📂 Importer Données
-                </button>
-                <span id="fileNameDisplay" style="font-size:0.8em; color:#666;">Aucun fichier</span>
+            <div style="display:flex; flex-direction:column; gap:3px;">
+                <div style="color:#fff; font-size:16px; font-weight:900; letter-spacing:.4px; text-transform:uppercase;">DÉPENSES CAISSES</div>
+                <div id="depenseLastUpdate" style="color:rgba(255,255,255,.78); font-size:12px; font-weight:700;">Date d'actualisation des données : --/--/----</div>
+                <div id="filterDisplay" style="color:#fff; font-size:11px; margin-top:2px;">Chargement...</div>
             </div>
         </div>
+        
+        <div style="display:flex; align-items:center; gap:10px; position:relative; z-index:1;">
+            <input type="file" id="fileExpenses" accept=".xlsx, .xls" multiple style="display:none;" onchange="window.handleFileSelect(event)">
+            <button class="action-btn" onclick="document.getElementById('fileExpenses').click()" style="background:#fff; color:#6366F1; border-radius:20px; padding:8px 20px; font-size:0.85em; font-weight:bold; cursor:pointer; border:none; box-shadow:0 3px 6px rgba(0,0,0,0.1);">
+                <i class="fas fa-folder-open"></i> Importer Données
+            </button>
+            <span id="fileNameDisplay" style="color:#fff; font-size:0.8em; opacity:0.8;">Aucun fichier</span>
+        </div>
+    </div>
 
-        <div style="display: flex; gap: 15px; flex-wrap: wrap; border-top: 1px solid #eee; padding-top: 15px;">
+    <style>
+    .modern-filter-box { background: #fff !important; padding: 16px 20px !important; margin-bottom: 20px !important; border-radius: 12px !important; box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important; border: 1px solid #e1e8ed !important; border-top: 4px solid #6366f1 !important; border-left: none !important; }
+    </style>
+    <div class="modern-filter-box">
+        <div style="display: flex; gap: 15px; flex-wrap: wrap;">
              <div class="sec-filter-group">
                  <label>Entité / Groupe</label>
                  <select id="depenseFilterEntite" onchange="updateSubEntityFilter(); updateExpensesView()" style="background:#f8f9fa;"></select>

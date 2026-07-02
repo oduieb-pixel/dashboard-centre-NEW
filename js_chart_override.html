@@ -681,6 +681,10 @@ function _renderMaterniteChart() {
             const chart = window.historyChartInstance;
 
             chart.data.datasets.forEach(function(ds) {
+                // ⚠️ IMPORTANT : On supprime l'ancienne configuration individuelle de l'étiquette
+                // pour que notre configuration globale (moderne) puisse enfin s'appliquer !
+                delete ds.datalabels;
+
                 if (ds.label && ds.label.includes('2026')) {
                     ds.borderColor = '#6366f1'; ds.backgroundColor = 'rgba(99,102,241,0.08)';
                     ds.borderWidth = 3; ds.pointBackgroundColor = '#6366f1';
@@ -704,22 +708,42 @@ function _renderMaterniteChart() {
                 font: { size: 12, weight: '700', family: "'Plus Jakarta Sans', sans-serif" },
                 padding: 8
             };
-            chart.options.layout = { padding: { top: 30, bottom: 5 } };
+            // Ajout de padding pour éviter que les étiquettes modernes ne soient coupées
+            chart.options.layout = { padding: { top: 35, bottom: 25, left: 10, right: 10 } };
 
+            // Nouvelle configuration moderne des étiquettes (DataLabels)
             chart.options.plugins.datalabels = {
-                display: ctx => { const v = ctx.dataset.data[ctx.dataIndex]; return v && parseFloat(v) > 0; },
-                color: ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? '#4f46e5' : '#94a3b8',
-                font: { weight: '800', size: 12, family: "'Plus Jakarta Sans', sans-serif" },
-                anchor: ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'end' : 'start',
-                align:  ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'top' : 'bottom',
-                offset: 6,
-                formatter: v => {
-                    if (!v || v === '0.0' || parseFloat(v) === 0) return '';
-                    return parseFloat(v).toFixed(0) + (type === 'occupation' ? '%' : '');
+                display: ctx => {
+                    const v = ctx.dataset.data[ctx.dataIndex];
+                    return v && parseFloat(v) > 0; // Afficher uniquement si > 0
                 },
-                backgroundColor: ctx => ctx.dataset.label && ctx.dataset.label.includes('2026') ? 'rgba(99,102,241,0.1)' : 'transparent',
-                borderRadius: 4,
-                padding: { top: 3, bottom: 3, left: 6, right: 6 }
+                align: ctx => (ctx.dataset.label && ctx.dataset.label.includes('2026')) ? 'top' : 'bottom',
+                offset: 6,
+                backgroundColor: ctx => {
+                    // On récupère le mois sélectionné dans le filtre
+                    const mVal = document.getElementById('mois')?.value || '';
+                    const is2026 = ctx.dataset.label && ctx.dataset.label.includes('2026');
+                    const currentMonthLabel = chart.data.labels[ctx.dataIndex];
+                    
+                    // Si c'est 2026 ET que ça correspond au mois sélectionné : on met en orange
+                    if (is2026 && currentMonthLabel === mVal) return '#E67E22';
+                    // Sinon, bleu pour 2026, gris pour 2025
+                    return is2026 ? 'rgba(54, 55, 149, 0.85)' : 'rgba(149, 165, 166, 0.85)';
+                },
+                color: '#ffffff', // Texte en blanc
+                font: {
+                    family: "'Plus Jakarta Sans', sans-serif",
+                    size: 11,
+                    weight: 'bold'
+                },
+                borderRadius: 6, // Design plus arrondi/moderne
+                padding: { top: 4, bottom: 4, left: 8, right: 8 },
+                formatter: v => {
+                    if (!v || parseFloat(v) === 0) return '';
+                    let val = parseFloat(v);
+                    let text = val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
+                    return text + (type === 'occupation' ? ' %' : '');
+                }
             };
 
             chart.options.plugins.legend = {

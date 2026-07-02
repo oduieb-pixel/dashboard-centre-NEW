@@ -495,10 +495,16 @@ function attemptLogin() {
                 name: "12.1 Vue Globale RH", 
                 action: () => { if(typeof enterRhMode_ === 'function') enterRhMode_(); }, 
                 captureId: "view-rh" 
-                // Nous avons retiré 'hideIds' pour que tout soit capturé en une seule fois
             }
         ]
-    }
+      },
+      "ACHAT_GROUP": {
+          title: "13. GESTION DES ACHATS",
+          targetId: "view-achat",
+          items: [ 
+              { name: "13.1 Vue Globale Achats", action: () => { if(typeof updateAchatView === 'function') updateAchatView(); }, captureId: "view-achat" }
+          ]
+      }
   };
 
   // =======================================================================
@@ -736,12 +742,38 @@ if (updateStatusEl) {
   function showError(e) { document.getElementById('loadingOverlay').style.display = 'none'; alert("Erreur : " + e.message); }
   
   function updateMonthOptions() {
-      const trim = document.getElementById('trimestre').value;
-      const ms = document.getElementById('mois'); const cur = ms.value; ms.innerHTML = '<option value="">TOUT</option>';
-      let list = window.monthOrder; if (trim && window.quarters[trim]) list = window.quarters[trim];
-      list.forEach(m => ms.add(new Option(m, m)));
-      ms.value = list.includes(cur) ? cur : '';
-      const lm = document.getElementById('localMois'); if(lm) { lm.innerHTML = ms.innerHTML; lm.value = ms.value; }
+      const ht = document.getElementById('trimestre');
+      const hm = document.getElementById('mois'); 
+      
+      // 1. S'assurer que le Trimestre global a bien ses options
+      if (ht && ht.options.length <= 1) {
+          ht.innerHTML = '<option value="">TOUT</option><option value="T1">T1</option><option value="T2">T2</option><option value="T3">T3</option><option value="T4">T4</option>';
+      }
+
+      const trim = ht ? ht.value : '';
+      const cur = hm ? hm.value : ''; 
+      
+      // 2. Mettre à jour les options du Mois global selon le Trimestre
+      if (hm) {
+          hm.innerHTML = '<option value="">TOUT</option>';
+          let list = window.monthOrder; 
+          if (trim && window.quarters[trim]) list = window.quarters[trim];
+          list.forEach(m => hm.add(new Option(m, m)));
+          hm.value = list.includes(cur) ? cur : '';
+      }
+
+      // 3. PROPAGER les options et les valeurs à TOUS les onglets
+      const trimIds = ['localTrimestre', 'localBudgetTrimestre', 'recouvFilterTrim', 'depenseFilterTrim', 'honoFilterTrim', 'rhTrimestre', 'achatFilterTrim'];
+      trimIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el && ht) { el.innerHTML = ht.innerHTML; el.value = ht.value; }
+      });
+
+      const monthIds = ['localMois', 'localBudgetMois', 'recouvFilterMois', 'depenseFilterMois', 'honoFilterMois', 'rhMois', 'achatFilterMois'];
+      monthIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el && hm) { el.innerHTML = hm.innerHTML; el.value = hm.value; }
+      });
   }
 
 function syncFilters(src) {
@@ -781,9 +813,8 @@ function syncFilters(src) {
       const rht = document.getElementById('rhTrimestre');
       const rhm = document.getElementById('rhMois');
       // AJOUT POUR LE MODULE ACHAT
-      const ae = document.getElementById('achatFilterEntite');
+      const ae = document.getElementById('achatFilterSite');
       const aa = document.getElementById('achatFilterAnnee');
-      const att = document.getElementById('achatFilterTrim');
       const am = document.getElementById('achatFilterMois');
       
       if(src === 'entite' || src === 'trimestre' || src === 'mois' || src === 'annee') { 
@@ -821,8 +852,14 @@ function syncFilters(src) {
           // SYNCHRONISATION ACHAT
           if(ae && he) { ae.value = he.value; if(ae.onchange) ae.onchange(); }
           if(aa && ha) { aa.value = ha.value; if(aa.onchange) aa.onchange(); }
-          if(att && ht) { att.value = ht.value; if(att.onchange) att.onchange(); }
           if(am && hm) { am.value = hm.value; if(am.onchange) am.onchange(); }
+          if(ht) { 
+              if (typeof selectedTrims !== 'undefined') {
+                  selectedTrims = ht.value ? [ht.value] : [];
+                  if (typeof renderTrimButtons === 'function') renderTrimButtons();
+                  if (typeof updateAchatView === 'function') updateAchatView();
+              }
+          }
       }
       
       if(src && src.startsWith('local')) { 
@@ -866,7 +903,15 @@ function syncFilters(src) {
           else if (viewId === 'view-depenses') { setVal('depenseFilterEntite', gEntite); setVal('depenseFilterTrim', gTrim); setVal('depenseFilterMois', gMois); } 
           else if (viewId === 'view-honoraires') { setVal('honoFilterEntite', gEntite); setVal('honoFilterTrim', gTrim); setVal('honoFilterMois', gMois); setVal('honoFilterAnnee', gAnnee); }
           else if (viewId === 'view-rh') { setVal('rhEntite', gEntite); setVal('rhTrimestre', gTrim); setVal('rhMois', gMois); setVal('rhAnnee', gAnnee); }
-          else if (viewId === 'view-achat') { setVal('achatFilterEntite', gEntite); setVal('achatFilterTrim', gTrim); setVal('achatFilterMois', gMois); setVal('achatFilterAnnee', gAnnee); }
+          else if (viewId === 'view-achat') { 
+              setVal('achatFilterSite', gEntite); 
+              setVal('achatFilterAnnee', gAnnee); 
+              setVal('achatFilterMois', gMois); 
+              if (typeof selectedTrims !== 'undefined') {
+                  selectedTrims = gTrim ? [gTrim] : [];
+                  if (typeof renderTrimButtons === 'function') renderTrimButtons();
+              }
+          }
       } catch(e) { console.error(e); }
   }
 
@@ -1209,18 +1254,8 @@ function syncFilters(src) {
       const anneeSelect = document.getElementById('annee');
       if(lAnnee && anneeSelect) { lAnnee.innerHTML = anneeSelect.innerHTML; lAnnee.value = anneeSelect.value; }
       
-      const lMois = document.getElementById('localMois'); const moisSelect = document.getElementById('mois');
-      if(moisSelect.options.length <= 1) { 
-          moisSelect.innerHTML = '<option value="">TOUT</option>'; 
-          monthOrder.forEach(m => moisSelect.add(new Option(m, m)));
-      }
-      if(lMois) { lMois.innerHTML = moisSelect.innerHTML; lMois.value = moisSelect.value; }
-      
-      const lTrim = document.getElementById('localTrimestre'); const trimSelect = document.getElementById('trimestre');
-      if(trimSelect.options.length <= 1) { 
-          trimSelect.innerHTML = '<option value="">TOUT</option><option value="T1">T1</option><option value="T2">T2</option><option value="T3">T3</option><option value="T4">T4</option>'; 
-      }
-      if(lTrim) { lTrim.innerHTML = trimSelect.innerHTML; lTrim.value = trimSelect.value; }
+      // Met à jour et propage toutes les listes de mois et trimestres
+      updateMonthOptions();
   }
 
 
