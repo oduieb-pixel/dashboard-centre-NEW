@@ -752,8 +752,8 @@ function updateFocusHospitalisationDynamic(filteredData, m, sousFam, entite, ele
       if (annee === "") { segmentBy = 6; groupByAxis = 1; chartTitle = `Comparatif 2025 vs 2026 - ${entite || "Région"} - ${element || sousFamille || famille}`; }
       else { chartTitle = `Évolution ${annee} - ${entite || "Région"} - ${element || sousFamille || famille}`; if (entite === '' && mois === '' && (!sousFamille || sousFamille === '') && (!element || element === '')) { groupByAxis = 1; } else if (entite !== '' && mois === '') { groupByAxis = 1; } else if (element !== '') { groupByAxis = (entite === '') ? 0 : (mois === '' ? 1 : 0); } }
       if(famille === 'Hospitalisation' && !sousFamille && !element && groupByAxis === 4) { groupByAxis = 3; }
-      // Forcer affichage par mois pour Radio et Chimio
-      if (famille === 'Radiothérapie' || famille === 'Chimiothérapie') { groupByAxis = 1; }
+      // Forcer affichage par mois pour Radio, Chimio et Urgence
+      if (famille === 'Radiothérapie' || famille === 'Chimiothérapie' || famille === 'Urgence') { groupByAxis = 1; }
       const aggregated = chartFiltered.reduce((acc, row) => { const ax = row[groupByAxis].toString(); const seg = (segmentBy !== null) ? row[segmentBy].toString() : 'Total'; const val = parseFloat(row[5]); if (!isNaN(val)) { acc[ax] = acc[ax] || {}; acc[ax][seg] = (acc[ax][seg] || 0) + val; } return acc; }, {});
       let entries = Object.entries(aggregated);
       if (groupByAxis === 1) { entries.sort((a, b) => monthOrder.indexOf(a[0]) - monthOrder.indexOf(b[0])); }
