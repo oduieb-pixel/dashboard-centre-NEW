@@ -27,19 +27,23 @@ if (typeof TOTAL_REGION_LABEL !== 'undefined') window.TOTAL_REGION_LABEL = "Rég
     /* ============================================ */
     /* HEADER (InfoBar)                              */
     /* ============================================ */
-    /* Règle supprimée pour ne pas forcer la bannière mauve en blanc */
     #recouvMainTitle {
-      font-size: 1.3em !important; font-weight: 900 !important;
-      color: #1e293b !important; font-family: 'Plus Jakarta Sans', sans-serif !important;
+      font-size: 16px !important; font-weight: 900 !important;
+      color: #fff !important; font-family: 'Plus Jakarta Sans', sans-serif !important;
+      letter-spacing: 0.4px !important; text-transform: uppercase !important;
     }
     #recouvSubTitle {
-      font-size: 0.82em !important; color: #6366f1 !important;
-      font-weight: 700 !important; font-family: 'Plus Jakarta Sans', sans-serif !important;
+      font-size: 12px !important; color: #fff !important;
+      font-weight: 800 !important; font-family: 'Plus Jakarta Sans', sans-serif !important;
+      letter-spacing: 0.5px !important; opacity: 0.9 !important;
     }
-    #recouvLastUpdate { font-size: 0.72em !important; color: #94a3b8 !important; }
+    #recouvLastUpdate { 
+      font-size: 10px !important; color: rgba(255,255,255,0.78) !important; 
+      font-weight: 600 !important; margin-top: 2px !important;
+    }
     .recouv-mgmt-row { display: flex; gap: 16px; margin-top: 6px; }
-    .recouv-mgmt-item { font-size: 0.75em; color: #64748b; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif; }
-    .recouv-mgmt-item strong { color: #1e293b; font-weight: 800; }
+    .recouv-mgmt-item { font-size: 0.75em; color: rgba(255, 255, 255, 0.8) !important; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .recouv-mgmt-item strong { color: #ffffff !important; font-weight: 800; }
     
     /* ============================================ */
     /* IMPORT BUTTON                                 */
@@ -305,7 +309,7 @@ function postRenderFixes() {
   var parent = titleEl.parentElement;
   var resp = document.getElementById('recouvResp'), dir = document.getElementById('recouvDirMed');
   var row = document.createElement('div'); row.id = 'recouvMgmtRow'; row.className = 'recouv-mgmt-row';
-  row.innerHTML = '<div class="recouv-mgmt-item"><i class="fas fa-user-tie" style="color:#6366f1;margin-right:4px;"></i>Resp: <strong>' + (resp ? resp.textContent : '--') + '</strong></div><div class="recouv-mgmt-item"><i class="fas fa-stethoscope" style="color:#6366f1;margin-right:4px;"></i>Dir. Med: <strong>' + (dir ? dir.textContent : '--') + '</strong></div>';
+  row.innerHTML = '<div class="recouv-mgmt-item"><i class="fas fa-user-tie" style="color:#ffffff;margin-right:4px;"></i>Resp: <strong>' + (resp ? resp.textContent : '--') + '</strong></div><div class="recouv-mgmt-item"><i class="fas fa-stethoscope" style="color:#ffffff;margin-right:4px;"></i>Dir. Med: <strong>' + (dir ? dir.textContent : '--') + '</strong></div>';
   parent.appendChild(row);
   // Force hide filters
   ['filterApprocheContainer', 'filterPatientContainer'].forEach(function(id) { var el = document.getElementById(id); if (el) el.setAttribute('style', 'display:none!important'); });

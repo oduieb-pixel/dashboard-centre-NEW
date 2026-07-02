@@ -721,6 +721,20 @@ function updateFocusHospitalisationDynamic(filteredData, m, sousFam, entite, ele
       document.querySelectorAll('.focus-panel-column').forEach(el => el.style.display = 'none');
       document.getElementById('pieChartWrapper').style.display = 'none';
       document.getElementById('headerMetrics').innerHTML = '<div style="font-size:0.85em; color:#999; font-style:italic;">Aucune donnée de capacité</div>';
+
+      // -- CONTENEUR DYNAMIQUE INDÉPENDANT (AJOUT) --
+      let dynamicPanel = document.getElementById('dynamicFocusPanel');
+      if (!dynamicPanel) {
+          dynamicPanel = document.createElement('div');
+          dynamicPanel.id = 'dynamicFocusPanel';
+          dynamicPanel.className = 'focus-panel-container';
+          dynamicPanel.style.width = '100%';
+          const focusZone = document.getElementById('flashFocusZone');
+          if (focusZone) focusZone.prepend(dynamicPanel);
+      }
+      dynamicPanel.style.display = 'none'; 
+      dynamicPanel.innerHTML = ''; // Réinitialisation stricte à chaque filtre
+      
       let monthsToKeep = null; if(mois && mois !== "") { monthsToKeep = [mois]; } else if (trim && trim !== "") { monthsToKeep = quarters[trim] || []; }
       let chartFiltered = normalizedData.filter(r => {
           const m = r[1].toString();
@@ -731,20 +745,63 @@ function updateFocusHospitalisationDynamic(filteredData, m, sousFam, entite, ele
           return basicMatch && yearMatch;
       });
       const panelData = chartFiltered;
+
       if (famille) {
           const f = famille.toUpperCase();
-          if (f.includes("BLOC")) { document.getElementById('focusPanelBloc').style.display = 'flex'; updateFocusBloc(panelData, annee); }
-          else if (f.includes("CHIMIO")) { document.getElementById('focusPanelChimio').style.display = 'flex'; updateFocusChimio(panelData, annee); }
-          else if (f.includes("CATH") || f.includes("RYTHMOLOGIE")) { document.getElementById('focusPanelCathe').style.display = 'flex'; updateFocusCathe(panelData, annee); }
-          else if (f.includes("DIALYSE")) { document.getElementById('focusPanelDialyse').style.display = 'flex'; updateFocusDialyse(panelData, annee); }
-          else if (f.includes("HOSPITALISATION")) { document.getElementById('focusPanelHospitalisation').style.display = 'flex'; updateFocusHospitalisationDynamic(panelData, mois, sousFamille, entite, element, annee); }
-          else if (f.includes("JOUR") || f.includes("HOPITAL DU JOUR")) { document.getElementById('focusPanelHopitalJour').style.display = 'flex'; updateFocusHopitalJour(panelData, mois, annee); }
-          else if (f.includes("URGENCE")) { document.getElementById('focusPanelUrgence').style.display = 'flex'; updateFocusUrgence(panelData, mois); }
-          else if (f.includes("RADIO") && !f.includes("LOGIE")) { document.getElementById('focusPanelRadio').style.display = 'flex'; updateFocusRadio(panelData); }
-          else if (f.includes("IMAGERIE") || f.includes("RADIOLOGIE")) { document.getElementById('focusPanelImagerie').style.display = 'flex'; updateFocusImagerie(panelData, mois); }
-          else if (f.includes("LABORATOIRE")) { document.getElementById('focusPanelLabo').style.display = 'flex'; updateFocusLabo(panelData, mois); document.getElementById('pieChartWrapper').style.display = 'flex'; updateLaboPieChart(chartFiltered); }
-          else if (f.includes("NUCL")) { document.getElementById('focusPanelNucleaire').style.display = 'flex'; updateFocusNucleaire(panelData); }
-          else if (f.includes("CONSULTATION")) { document.getElementById('focusPanelConsultation').style.display = 'flex'; updateFocusConsultation(panelData); }
+          const hasStandardPanel = f.includes("BLOC") || f.includes("CHIMIO") || f.includes("CATH") || f.includes("RYTHM") || f.includes("DIALYSE") || f.includes("HOSPITALISATION") || f.includes("JOUR") || f.includes("URGENCE") || (f.includes("RADIO") && !f.includes("LOGIE")) || f.includes("IMAGERIE") || f.includes("RADIOLOGIE") || f.includes("LABORATOIRE") || f.includes("NUCL") || f.includes("CONSULTATION");
+
+          if (sousFamille || element || !hasStandardPanel) {
+              // --- MODE DYNAMIQUE (CARTES MAUVES) ---
+              dynamicPanel.style.display = 'flex'; // On affiche notre panneau custom
+              
+              const aggregated = {};
+              panelData.forEach(r => {
+                  const elName = r[4] ? r[4].toString().toUpperCase() : 'INCONNU';
+                  if (!aggregated[elName]) aggregated[elName] = 0;
+                  aggregated[elName] += parseFloat(r[5] || 0);
+              });
+              
+              // Diviseur de jours selon la famille
+              let baseDays = 30;
+              if (f.includes("BLOC") || f.includes("CHIMIO") || f.includes("RADIO") || f.includes("IMAGERIE") || f.includes("LABO") || f.includes("NUCL") || f.includes("JOUR") || f.includes("CATH") || f.includes("ENDOSCOPIE") || f.includes("CURIETHERAPIE") || f.includes("MATERNITE")) baseDays = 22;
+              else if (f.includes("DIALYSE")) baseDays = 26;
+              const div = getDiviseurOuvrable(baseDays, mois, trim, annee);
+              
+              let dynamicHtml = '<div style="display:flex; flex-wrap:wrap; gap:15px; width:100%; margin-bottom:15px;">';
+              for (const [elName, total] of Object.entries(aggregated)) {
+                  if (total > 0) {
+                      const avg = (div > 0) ? (total / div) : 0;
+                      dynamicHtml += `
+                      <div class="focus-box" style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); border: none; color: white; flex: 1 1 250px; max-width: 320px; border-radius: 14px; padding: 18px; box-shadow: 0 4px 15px rgba(99,102,241,0.25); position:relative; overflow:hidden;">
+                          <div style="position:absolute; right:-20px; top:-20px; width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,0.1);"></div>
+                          <div class="focus-content" style="position:relative; z-index:1;">
+                              <div class="focus-label" style="font-size: 0.75em; font-weight: 800; opacity: 0.9; margin-bottom: 8px; color:#fff; text-transform:uppercase; letter-spacing:0.5px;">${elName}</div>
+                              <div class="focus-value" style="font-size: 1.8em; font-weight: 900; color:#fff; text-shadow: 0 2px 4px rgba(0,0,0,0.15);">${formatValue(total)}</div>
+                          </div>
+                          <div class="focus-footer" style="margin-top: 15px; font-size: 0.85em; font-weight: 700; background:rgba(0,0,0,0.15); padding:6px 12px; border-radius:8px; display:inline-block; color:#fff; position:relative; z-index:1;">
+                              Moy. ${formatDecimal(avg)} /j
+                          </div>
+                      </div>`;
+                  }
+              }
+              dynamicHtml += '</div>';
+              dynamicPanel.innerHTML = dynamicHtml; // Injection propre dans le conteneur vide
+              
+          } else {
+              // --- MODE STANDARD (S'IL N'Y A AUCUN FILTRE SOUS-FAMILLE / ELEMENT) ---
+              if (f.includes("BLOC")) { document.getElementById('focusPanelBloc').style.display = 'flex'; updateFocusBloc(panelData, annee); }
+              else if (f.includes("CHIMIO")) { document.getElementById('focusPanelChimio').style.display = 'flex'; updateFocusChimio(panelData, annee); }
+              else if (f.includes("CATH") || f.includes("RYTHMOLOGIE")) { document.getElementById('focusPanelCathe').style.display = 'flex'; updateFocusCathe(panelData, annee); }
+              else if (f.includes("DIALYSE")) { document.getElementById('focusPanelDialyse').style.display = 'flex'; updateFocusDialyse(panelData, annee); }
+              else if (f.includes("HOSPITALISATION")) { document.getElementById('focusPanelHospitalisation').style.display = 'flex'; updateFocusHospitalisationDynamic(panelData, mois, sousFamille, entite, element, annee); }
+              else if (f.includes("JOUR") || f.includes("HOPITAL DU JOUR")) { document.getElementById('focusPanelHopitalJour').style.display = 'flex'; updateFocusHopitalJour(panelData, mois, annee); }
+              else if (f.includes("URGENCE")) { document.getElementById('focusPanelUrgence').style.display = 'flex'; updateFocusUrgence(panelData, mois); }
+              else if (f.includes("RADIO") && !f.includes("LOGIE")) { document.getElementById('focusPanelRadio').style.display = 'flex'; updateFocusRadio(panelData); }
+              else if (f.includes("IMAGERIE") || f.includes("RADIOLOGIE")) { document.getElementById('focusPanelImagerie').style.display = 'flex'; updateFocusImagerie(panelData, mois); }
+              else if (f.includes("LABORATOIRE")) { document.getElementById('focusPanelLabo').style.display = 'flex'; updateFocusLabo(panelData, mois); document.getElementById('pieChartWrapper').style.display = 'flex'; updateLaboPieChart(chartFiltered); }
+              else if (f.includes("NUCL")) { document.getElementById('focusPanelNucleaire').style.display = 'flex'; updateFocusNucleaire(panelData); }
+              else if (f.includes("CONSULTATION")) { document.getElementById('focusPanelConsultation').style.display = 'flex'; updateFocusConsultation(panelData); }
+          }
       }
       const totalFiltered = chartFiltered.reduce((sum, row) => sum + parseFloat(row[5] || 0), 0);
       updateKpi(totalFiltered, entite, mois, trim, famille, sousFamille, element, null, annee);
