@@ -433,6 +433,11 @@ function hideMasseSkeleton_() {
 
 // === CORRECTION VARIABLES: agrégation robuste qui scanne plusieurs structures backend ===
 function getVarsForMonth_(res, mois) {
+  // 0. Format réel renvoyé par apiRHMasse (Code.gs) : res.varsSeries = tableau {mois, actes, garde, df, autres, total}
+  if (res.varsSeries && Array.isArray(res.varsSeries)) {
+    var foundReal = res.varsSeries.filter(function(v){ return v.mois === mois; })[0];
+    if (foundReal) return foundReal;
+  }
   // 1. Tenter dans res.series.varsPerMonth (notre format)
   if (res.series && res.series.varsPerMonth && res.series.varsPerMonth[mois]) {
     return res.series.varsPerMonth[mois];

@@ -26,6 +26,13 @@ const formatDynamicLabel = (val) => {
     return val.toFixed(0);
 };
 
+// Normalise la casse des catégories pour éviter les doublons (ex: "FOURNITURES" / "fournitures" / "Fournitures")
+function normalizeCategorie(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "Non défini";
+    return s.toLowerCase().replace(/(^|[\s\-'])([a-zàâäéèêëïîôöùûüç])/g, (m, sep, c) => sep + c.toUpperCase());
+}
+
 // --- CHARGEMENT ---
 function loadExpensesData() {
     google.script.run.withSuccessHandler(response => {
@@ -68,7 +75,7 @@ function renderExpensesDashboard(data) {
             jour: jour, mois: mois, annee: annee || new Date().getFullYear(),
             dateDisplay: dateDisplay,
             action: r[4], montant: parseFloat(r[5]) || 0,
-            nature: r[6], categorie: r[7] || "Non défini", ordre: r[8] || "-"
+            nature: r[6], categorie: normalizeCategorie(r[7]), ordre: r[8] || "-"
         };
     });
 
@@ -134,7 +141,7 @@ function updateExpensesView() {
     const fAnnee = document.getElementById('depenseFilterAnnee') ? document.getElementById('depenseFilterAnnee').value : "";
     const fTrim = document.getElementById('depenseFilterTrim').value;
     const fMois = document.getElementById('depenseFilterMois').value;
-    const fType = document.getElementById('depenseFilterType').value;
+    let fType = document.getElementById('depenseFilterType').value;
 
     const txtEntite = fSub ? fSub : (fGroupe ? fGroupe : "Toutes Entités");
     const txtPer = fMois ? "Mois : " + fMois : (fTrim ? "Trimestre : " + fTrim : (fAnnee ? "Année " + fAnnee : "Toutes Années"));
@@ -142,6 +149,23 @@ function updateExpensesView() {
 
     let targetMonths = depMonthOrder;
     if (fMois) targetMonths = [fMois]; else if (fTrim) targetMonths = depQuarters[fTrim];
+
+    // CORRECTION : le filtre Catégorie ne propose que les catégories ayant réellement
+    // des dépenses pour l'entité/sous-entité/période actuellement sélectionnées.
+    const dataForCategoryOptions = globalExpensesData.filter(d => {
+        if (fGroupe && d.groupe !== fGroupe) return false;
+        if (fSub && d.entite !== fSub) return false;
+        if (fAnnee && String(d.annee) !== String(fAnnee)) return false;
+        if (!targetMonths.includes(d.mois)) return false;
+        return true;
+    });
+    const availableTypes = [...new Set(dataForCategoryOptions.map(d => d.categorie))].filter(t => t && t !== "Non défini").sort();
+    const selType = document.getElementById('depenseFilterType');
+    if (selType) {
+        populateExpSelect('depenseFilterType', availableTypes);
+        if (fType && availableTypes.includes(fType)) { selType.value = fType; }
+        else { selType.value = ""; fType = ""; }
+    }
 
     currentFilteredData = globalExpensesData.filter(d => {
         if (fGroupe && d.groupe !== fGroupe) return false;

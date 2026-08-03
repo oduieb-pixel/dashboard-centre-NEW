@@ -392,10 +392,10 @@ function drawBudgetChartEvol(mainRows, calcEntite, activeMonths, isComparison, r
               datalabels: { align: 'bottom', anchor: 'center', offset: 8, color: '#f59e0b', backgroundColor: isDark ? '#1e293b' : '#fff', borderRadius: 6, font: { weight: '800', size: 11, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (v) => (v > 0 ? '+' : '') + v + '%' }
           });
 
-          if (isComparison) {
-              config.data.datasets.push({ type: 'bar', label: prevYear, data: dataPrev, backgroundColor: '#e2e8f0', borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 2, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
-          }
-          config.data.datasets.push({ type: 'bar', label: refYear, data: dataRef, backgroundColor: gradientStd, borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 1, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
+          // CORRECTION : en mode N/N-1, on affiche toujours les 2 années (2025 et 2026),
+          // sans dépendre du filtre Année (avant, il fallait mettre le filtre sur "TOUT").
+          config.data.datasets.push({ type: 'bar', label: prevYear, data: dataPrev, backgroundColor: '#e2e8f0', borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 1, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
+          config.data.datasets.push({ type: 'bar', label: refYear, data: dataRef, backgroundColor: gradientStd, borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 2, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
           
       } else {
           config.data.labels = activeMonths;
@@ -424,10 +424,10 @@ function drawBudgetChartEvol(mainRows, calcEntite, activeMonths, isComparison, r
               datalabels: { align: 'bottom', anchor: 'center', offset: 8, color: '#f59e0b', backgroundColor: isDark ? '#1e293b' : '#fff', borderRadius: 6, font: { weight: '800', size: 11, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (v) => (v > 0 ? '+' : '') + v + '%' }
           });
           
-          if (isComparison) {
-              config.data.datasets.push({ type: 'bar', label: prevYear, data: aggPrev, backgroundColor: '#e2e8f0', borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 2, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
-          }
-          config.data.datasets.push({ type: 'bar', label: refYear, data: aggRef, backgroundColor: gradientStd, borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 1, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
+          // CORRECTION : en mode N/N-1, on affiche toujours les 2 années (2025 et 2026),
+          // sans dépendre du filtre Année (avant, il fallait mettre le filtre sur "TOUT").
+          config.data.datasets.push({ type: 'bar', label: prevYear, data: aggPrev, backgroundColor: '#e2e8f0', borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 1, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
+          config.data.datasets.push({ type: 'bar', label: refYear, data: aggRef, backgroundColor: gradientStd, borderRadius: 10, barPercentage: 0.55, categoryPercentage: 0.75, order: 2, datalabels: { color: isDark ? '#e2e8f0' : '#1e293b', anchor: 'end', align: 'top', offset: 2, font: { weight: '800', size: 12, family: "'Plus Jakarta Sans',sans-serif" }, formatter: (val) => val > 0 ? fmtKshort(val) : '' } });
       }
 
   } else {

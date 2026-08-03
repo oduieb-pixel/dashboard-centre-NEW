@@ -2828,8 +2828,36 @@ function changeUserPassword(username, oldPass, newPass, clientIp) {
 // Col 41 : Modalité Paiement
 // Col 57 : Réf Comptable (réconciliation Sage — non utilisée ici)
 // -----------------------------------------------------------------------
-const ACHAT_CACHE_KEY  = 'ACHAT_DATA_v23';
+const ACHAT_CACHE_KEY  = 'ACHAT_DATA_v24';
 const ACHAT_CACHE_SEC  = 600; // 10 min
+const ACHAT_CACHE_CHUNK = 90000; // marge sous la limite de 100 Ko de CacheService
+
+// Écrit une grande chaîne dans le cache en la découpant en plusieurs clés
+function cachePutChunked_(cache, key, str, ttl) {
+  var n = Math.ceil(str.length / ACHAT_CACHE_CHUNK) || 1;
+  var toPut = {};
+  toPut[key + '_meta'] = String(n);
+  for (var i = 0; i < n; i++) {
+    toPut[key + '_' + i] = str.substr(i * ACHAT_CACHE_CHUNK, ACHAT_CACHE_CHUNK);
+  }
+  cache.putAll(toPut, ttl);
+}
+// Relit et rassemble les morceaux ; retourne null si un chunk manque (cache expiré)
+function cacheGetChunked_(cache, key) {
+  var n = cache.get(key + '_meta');
+  if (!n) return null;
+  n = parseInt(n, 10);
+  var keys = [];
+  for (var i = 0; i < n; i++) keys.push(key + '_' + i);
+  var all = cache.getAll(keys);
+  var parts = [];
+  for (var i = 0; i < n; i++) {
+    var part = all[key + '_' + i];
+    if (part == null) return null;
+    parts.push(part);
+  }
+  return parts.join('');
+}
 
 var SITE_MAP_ACHAT = {
   'CSS':'CCS','CCS':'CCS','CCSS':'CCS',
@@ -2945,7 +2973,7 @@ function getAchatData(){
   var user = getUserContext();
   try{
     var cache=CacheService.getScriptCache();
-    var cached=cache.get(ACHAT_CACHE_KEY);
+    var cached=cacheGetChunked_(cache, ACHAT_CACHE_KEY);
     if(cached){
       try{
         var p=JSON.parse(cached);
@@ -2967,13 +2995,11 @@ function getAchatData(){
 
     try{
       // On met en cache la version COMPLÈTE (non filtrée), pour tous les utilisateurs
+      // CORRECTION : plus de troncature à 2500 lignes (coupait les entités CIK/HPB
+      // situées en fin de feuille 2025, qui se retrouvaient vides après filtrage).
+      // On découpe le JSON en chunks à la place, sans perdre de données.
       var json=JSON.stringify(result);
-      if(json.length<95000){cache.put(ACHAT_CACHE_KEY,json,ACHAT_CACHE_SEC);}
-      else{
-        /* Trop gros : tronquer */
-        result.data=d2026.slice(0,2500);result.data2025=d2025.slice(0,2500);result.truncated=true;
-        cache.put(ACHAT_CACHE_KEY,JSON.stringify(result),ACHAT_CACHE_SEC);
-      }
+      cachePutChunked_(cache, ACHAT_CACHE_KEY, json, ACHAT_CACHE_SEC);
     }catch(e){Logger.log('Cache write: '+e.message);}
 
     // SÉCURITÉ : filtrage appliqué juste avant l'envoi, jamais dans le cache

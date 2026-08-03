@@ -51,6 +51,7 @@ function fmtN(v){if(!v||isNaN(v))return'0';return Math.round(v).toString().repla
 function fmtK(v){if(!v||isNaN(v))return'0 K';return Math.round(v/1000).toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' K';}
 function fmtD(v,d){if(v==null||isNaN(v))return'0';var p=Number(v).toFixed(d||0).split('.');p[0]=p[0].replace(/\B(?=(\d{3})+(?!\d))/g,' ');return p.join(',');}
 function pd(s){if(!s)return null;try{var d=new Date(s);return isNaN(d.getTime())?null:d;}catch(e){return null;}}
+function fmtDate(s){var d=pd(s);if(!d)return'-';return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}
 function dbDays(a,b){var da=pd(a),db2=pd(b);if(!da||!db2)return null;var d=(db2-da)/864e5;return(d>=0&&d<500)?d:null;}
 function getMoisISO(s){var d=pd(s);return d?MONTHS[d.getMonth()]:null;}
 function getYTD(){var mi=new Date().getMonth(),r=[];for(var i=0;i<=mi;i++)r.push(MONTHS[i]);return r;}
@@ -554,6 +555,8 @@ function openChartModal(idx){
     if(val.length>0){h+='<div style="font-weight:700;color:'+CLR.c2026+';margin-bottom:8px;font-size:.84em;text-transform:uppercase">Consommation 2026'+periodeLabel+' ('+val.length+')</div>';h+=rTable(val);}
     var eng2=currentModalRows.filter(function(d){return d.isEngaged;});
     if(eng2.length>0){h+='<div style="font-weight:700;color:'+CLR.engage+';margin:14px 0 8px;font-size:.84em;text-transform:uppercase">Engagé 2026'+periodeLabel+' ('+eng2.length+')</div>';h+=rTable(eng2);}
+    var val25=rows25.filter(function(d){return d.isValide;});
+    if(val25.length>0){h+='<div style="font-weight:700;color:'+CLR.c2025+';margin:14px 0 8px;font-size:.84em;text-transform:uppercase">Consommation 2025'+periodeLabel+' ('+val25.length+')</div>';h+=rTable(val25);}
   } else if(currentModalRows.length>0){
     h+='<div style="font-weight:700;color:'+CLR.c2025+';margin-bottom:8px;font-size:.84em;text-transform:uppercase">Consommation 2025'+periodeLabel+' ('+currentModalRows.length+')</div>';
     h+=rTable(currentModalRows);
@@ -591,13 +594,14 @@ function rModalChart(row,rows25,obj,f){
 
 function rTable(lines){
   var h='<div style="max-height:250px;overflow-y:auto;border:1px solid '+CLR.border+';border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:.8em"><thead style="background:'+CLR.bg+';position:sticky;top:0"><tr>'
+    +'<th style="padding:7px 8px;text-align:left;color:'+CLR.slate+';font-weight:600">Date</th>'
     +'<th style="padding:7px 8px;text-align:left;color:'+CLR.slate+';font-weight:600">BC</th>'
     +'<th style="padding:7px 8px;text-align:left;color:'+CLR.slate+';font-weight:600">Site</th>'
     +'<th style="padding:7px 8px;text-align:left;color:'+CLR.slate+';font-weight:600">Fournisseur</th>'
     +'<th style="padding:7px 8px;text-align:left;color:'+CLR.slate+';font-weight:600">Désignation</th>'
     +'<th style="padding:7px 8px;text-align:right;color:'+CLR.slate+';font-weight:600">TTC</th>'
     +'</tr></thead><tbody>';
-  lines.forEach(function(l){h+='<tr style="border-bottom:1px solid '+CLR.border+'"><td style="padding:6px 8px;font-weight:700;color:'+CLR.ink+'">'+l.bonCommande+'</td><td style="padding:6px 8px;color:'+CLR.slate+'">'+siteDisp(l.site)+'</td><td style="padding:6px 8px;color:'+CLR.slate+'">'+l.fournisseur+'</td><td style="padding:6px 8px;color:'+CLR.muted+';max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+l.designation+'</td><td style="padding:6px 8px;text-align:right;font-weight:800;color:'+CLR.ink+'">'+fmtN(l.montantTTC)+'</td></tr>';});
+  lines.forEach(function(l){h+='<tr style="border-bottom:1px solid '+CLR.border+'"><td style="padding:6px 8px;color:'+CLR.slate+'">'+fmtDate(l.dateCreaBC)+'</td><td style="padding:6px 8px;font-weight:700;color:'+CLR.ink+'">'+l.bonCommande+'</td><td style="padding:6px 8px;color:'+CLR.slate+'">'+siteDisp(l.site)+'</td><td style="padding:6px 8px;color:'+CLR.slate+'">'+l.fournisseur+'</td><td style="padding:6px 8px;color:'+CLR.muted+';max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+l.designation+'</td><td style="padding:6px 8px;text-align:right;font-weight:800;color:'+CLR.ink+'">'+fmtN(l.montantTTC)+'</td></tr>';});
   h+='</tbody></table></div>';return h;
 }
 
@@ -651,8 +655,10 @@ function openFournisseurModal(idx){
   l26.forEach(function(d){if(d.isValide){var i=MONTHS.indexOf(d.mois);if(i>=0)bm26[i]+=d.montantTTC;}});
   l25.forEach(function(d){var i=MONTHS.indexOf(d.mois);if(i>=0)bm25[i]+=d.consommation;});
   h+='<div style="background:#fff;border:1px solid '+CLR.border+';border-radius:12px;padding:16px;margin-bottom:18px"><div style="font-weight:700;color:'+CLR.ink+';font-size:.88em;text-transform:uppercase;margin-bottom:12px">Comparaison mensuelle</div><div style="height:240px;position:relative"><canvas id="modalFournChart"></canvas></div></div>';
-  h+='<div style="font-weight:700;color:'+CLR.ink+';margin-bottom:8px;font-size:.84em;text-transform:uppercase">Détail ('+l26.length+' lignes)</div>';
+  h+='<div style="font-weight:700;color:'+CLR.ink+';margin-bottom:8px;font-size:.84em;text-transform:uppercase">Détail Consommation 2026 ('+l26.length+' lignes)</div>';
   h+=rTable(l26);
+  var val25f=l25.filter(function(d){return d.isValide;});
+  if(val25f.length>0){h+='<div style="font-weight:700;color:'+CLR.c2025+';margin:14px 0 8px;font-size:.84em;text-transform:uppercase">Détail Consommation 2025 ('+val25f.length+' lignes)</div>';h+=rTable(val25f);}
   achHTML('modalContent',h);document.getElementById('achatDetailModal').style.display='flex';
   setTimeout(function(){rFChart(bm26,bm25);},150);
 }
@@ -661,10 +667,10 @@ function rFChart(d26,d25){
   var c=document.getElementById('modalFournChart');if(!c||typeof Chart==='undefined')return;
   if(window._fC)window._fC.destroy();
   window._fC=new Chart(c.getContext('2d'),{type:'bar',data:{labels:MONTHS,datasets:[
-    {label:'Conso 2026',data:d26.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2026,borderRadius:6,barPercentage:.45,categoryPercentage:.7},
-    {label:'Conso 2025',data:d25.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2025+'80',borderColor:CLR.c2025,borderWidth:1,borderRadius:6,barPercentage:.45,categoryPercentage:.7}
+    {label:'Conso 2025',data:d25.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2025+'80',borderColor:CLR.c2025,borderWidth:1,borderRadius:6,barPercentage:.45,categoryPercentage:.7},
+    {label:'Conso 2026',data:d26.map(function(v){return Math.round(v/1000);}),backgroundColor:CLR.c2026,borderRadius:6,barPercentage:.45,categoryPercentage:.7}
   ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:10,font:{size:11,weight:'600'}}},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+' : '+ctx.raw.toLocaleString('fr-FR')+' K MAD';}}}},scales:{y:{display:false},x:{ticks:{font:{size:11,weight:'700'}},grid:{display:false}}}},
-  plugins:[{id:'dlb',afterDatasetsDraw:function(ch){var ctx=ch.ctx;ch.data.datasets.forEach(function(ds,di){ch.getDatasetMeta(di).data.forEach(function(bar,ii){var v=ds.data[ii];if(!v)return;ctx.save();ctx.font='bold 9px sans-serif';ctx.fillStyle=di===0?CLR.c2026:CLR.c2025;ctx.textAlign='center';ctx.fillText(v+'K',bar.x,bar.y-6);ctx.restore();});});}}]});
+  plugins:[{id:'dlb',afterDatasetsDraw:function(ch){var ctx=ch.ctx;ch.data.datasets.forEach(function(ds,di){ch.getDatasetMeta(di).data.forEach(function(bar,ii){var v=ds.data[ii];if(!v)return;ctx.save();ctx.font='bold 9px sans-serif';ctx.fillStyle=di===0?CLR.c2025:CLR.c2026;ctx.textAlign='center';ctx.fillText(v+'K',bar.x,bar.y-6);ctx.restore();});});}}]});
 }
 
 function closeAchatDetailModal(e){if(e&&e.target&&e.target.id!=='achatDetailModal')return;document.getElementById('achatDetailModal').style.display='none';}

@@ -394,11 +394,13 @@ window.openHistoryModal = function(type, entite, keyName, elementFilter) {
       const localAnneeSelect = document.getElementById('localAnnee');
       const populateYear = (sel) => {
           if (!sel) return;
+          const currentVal = sel.value;
           sel.innerHTML = '<option value="">TOUT</option>';
           Array.from(anneeSet).sort().reverse().forEach(y => sel.add(new Option(y, y)));
-          const currentYear = new Date().getFullYear();
-          if (anneeSet.has(currentYear)) sel.value = currentYear;
-          else if (sel.options.length > 1) sel.value = sel.options[1].value;
+          // CORRECTION : par défaut on reste sur "TOUT" pour afficher directement le comparatif
+          // 2025 vs 2026 sur le graphique (au lieu de forcer l'année en cours). Si l'utilisateur
+          // avait déjà choisi une année précise, on la restaure.
+          if (currentVal && Array.from(sel.options).some(o => o.value === String(currentVal))) sel.value = currentVal;
       };
       populateYear(anneeSelect); populateYear(localAnneeSelect);
       const familleSet = new Set(normalizedData.map(r => r[2].toString()).filter(isFilterValueValid));
@@ -822,7 +824,7 @@ function updateFocusHospitalisationDynamic(filteredData, m, sousFam, entite, ele
       let chartDatasets = [];
       if (segmentBy !== null) {
           let segList = ["2025", "2026"];
-          segList.forEach((seg, index) => { let data = chartLabels.map(lbl => aggregated[lbl] ? aggregated[lbl][seg] || 0 : 0); let dsColor = (seg === "2026") ? gradientDesign : "#bdc3c7"; chartDatasets.push({ type: 'bar', label: seg, data: data, backgroundColor: dsColor, borderRadius: 8, barPercentage: 0.7, categoryPercentage: 0.8, order: (seg==="2026"?1:2) }); });
+          segList.forEach((seg, index) => { let data = chartLabels.map(lbl => aggregated[lbl] ? aggregated[lbl][seg] || 0 : 0); let dsColor = (seg === "2026") ? gradientDesign : "#bdc3c7"; chartDatasets.push({ type: 'bar', label: seg, data: data, backgroundColor: dsColor, borderRadius: 8, barPercentage: 0.7, categoryPercentage: 0.8, order: (seg==="2025"?1:2) }); });
       } else {
           const data = chartLabels.map(lbl => Object.values(aggregated[lbl]).reduce((a, b) => a + b, 0));
           const validData = data.filter(d => d > 0);

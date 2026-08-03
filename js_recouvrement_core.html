@@ -436,6 +436,7 @@ window.switchFamily = function(mainFam, subFam, btn) {
         currentData = nonSoldesData;
         safeSetText('recouvLastUpdate', "Actualisation via import : " + lastUpdateNonSoldes);
         toggleFilters('NON_SOLDES');
+        initRecouvFilters();
         updateRecouvDashboard();
     } else if (mainFam === 'Recouvrement') {
         currentData = recouvData;
@@ -613,7 +614,7 @@ window.updateRecouvDashboard = function() {
     const fEnt = document.getElementById('recouvFilterEntite').value;
     const fAn = document.getElementById('recouvFilterAnnee').value;
     const fMois = document.getElementById('recouvFilterMois').value;
-    const fOrg = document.getElementById('recouvFilterOrganisme').value;
+    let fOrg = document.getElementById('recouvFilterOrganisme').value;
     const fTrim = document.getElementById('recouvFilterTrim').value;
     
     // CORRECTION ICI : Gestion propre des filtres MultiSelect
@@ -654,6 +655,59 @@ window.updateRecouvDashboard = function() {
         return;
     }
 
+    // CORRECTION : recalcule les options d'Organisme (et Type Org / État Dossier pour les
+    // Non-Soldés) selon l'entité/sous-entité/période actuellement sélectionnées, pour ne
+    // proposer que des valeurs ayant réellement des données (même logique que sur Dépenses Caisse).
+    const baseForOptions = currentData.filter(d => {
+        if (fEnt === "HIA CIOA") {
+            if (d.entite !== "HIA" && d.entite !== "CIOA") return false;
+            if (fSub && d.entite !== fSub) return false;
+        } else if (fEnt && d.entite !== fEnt) return false;
+
+        if (fAn && String(d.anneeRef) !== String(fAn)) return false;
+        if (fMois && d.moisRef !== fMois) return false;
+        if (fTrim) {
+            let validMonths = [];
+            if(fTrim==="T1") validMonths=["JAN","FEV","MAR"];
+            else if(fTrim==="T2") validMonths=["AVR","MAI","JUIN"];
+            else if(fTrim==="T3") validMonths=["JUIL","AOU","SEP"];
+            else if(fTrim==="T4") validMonths=["OCT","NOV","DEC"];
+            if (d.moisRef && !validMonths.includes(d.moisRef)) return false;
+        }
+        return true;
+    });
+
+    const availableOrgs = [...new Set(baseForOptions.map(d => d.organisme).filter(x => x))].sort();
+    const selOrgLive = document.getElementById('recouvFilterOrganisme');
+    if (selOrgLive) {
+        selOrgLive.innerHTML = '<option value="">TOUS</option>';
+        availableOrgs.forEach(o => selOrgLive.add(new Option(o, o)));
+        if (fOrg && availableOrgs.includes(fOrg)) { selOrgLive.value = fOrg; }
+        else { selOrgLive.value = ""; fOrg = ""; }
+    }
+
+    if (currentSubFamily === 'Dossiers non soldés') {
+        const baseForNonSoldesOptions = fOrg ? baseForOptions.filter(d => d.organisme === fOrg) : baseForOptions;
+
+        const availableTypeOrgs = [...new Set(baseForNonSoldesOptions.map(d => d.typeOrganisme).filter(x => x))].sort();
+        if (fTypeOrgSel) {
+            const keepTypeOrgs = fTypeOrgs.filter(v => availableTypeOrgs.includes(v));
+            fTypeOrgSel.innerHTML = '';
+            availableTypeOrgs.forEach(o => fTypeOrgSel.add(new Option(o, o)));
+            Array.from(fTypeOrgSel.options).forEach(opt => { if (keepTypeOrgs.includes(opt.value)) opt.selected = true; });
+            fTypeOrgs.length = 0; keepTypeOrgs.forEach(v => fTypeOrgs.push(v));
+        }
+
+        const availableEtats = [...new Set(baseForNonSoldesOptions.map(d => d.etatDossier).filter(x => x))].sort();
+        if (fEtatSel) {
+            const keepEtats = fEtats.filter(v => availableEtats.includes(v));
+            fEtatSel.innerHTML = '';
+            availableEtats.forEach(e => fEtatSel.add(new Option(e, e)));
+            Array.from(fEtatSel.options).forEach(opt => { if (keepEtats.includes(opt.value)) opt.selected = true; });
+            fEtats.length = 0; keepEtats.forEach(v => fEtats.push(v));
+        }
+    }
+
     let filtered = currentData.filter(d => {
         if (fEnt === "HIA CIOA") { 
             if (d.entite !== "HIA" && d.entite !== "CIOA") return false; 
@@ -662,6 +716,19 @@ window.updateRecouvDashboard = function() {
         else if (fEnt && d.entite !== fEnt) return false;
         
         if (fOrg && d.organisme !== fOrg) return false;
+
+        // CORRECTION : Année / Mois / Trimestre s'appliquent maintenant dans tous les cas,
+        // y compris sur "Dossiers non soldés" (avant, ils étaient ignorés pour ce sous-module).
+        if (fAn && String(d.anneeRef) !== String(fAn)) return false;
+        if (fMois && d.moisRef !== fMois) return false;
+        if (fTrim) {
+            let validMonths = [];
+            if(fTrim==="T1") validMonths=["JAN","FEV","MAR"];
+            else if(fTrim==="T2") validMonths=["AVR","MAI","JUIN"];
+            else if(fTrim==="T3") validMonths=["JUIL","AOU","SEP"];
+            else if(fTrim==="T4") validMonths=["OCT","NOV","DEC"];
+            if (d.moisRef && !validMonths.includes(d.moisRef)) return false;
+        }
 
         if (currentSubFamily === 'Dossiers non soldés') {
             if (fTypeOrgs.length > 0 && !fTypeOrgs.includes(d.typeOrganisme)) return false;
@@ -676,18 +743,6 @@ window.updateRecouvDashboard = function() {
             if (nonSoldesMode === 'TRANSFERT_N2') {
                 if (d.reste < 0) return false;
                 if (!d.isTransfertN2 || d.transferListN2.length === 0) return false;
-            }
-        } else {
-            if (fAn && String(d.anneeRef) !== String(fAn)) return false;
-            if (fMois && d.moisRef !== fMois) return false;
-            
-            if (fTrim) {
-                let validMonths = [];
-                if(fTrim==="T1") validMonths=["JAN","FEV","MAR"];
-                else if(fTrim==="T2") validMonths=["AVR","MAI","JUIN"];
-                else if(fTrim==="T3") validMonths=["JUIL","AOU","SEP"];
-                else if(fTrim==="T4") validMonths=["OCT","NOV","DEC"];
-                if (d.moisRef && !validMonths.includes(d.moisRef)) return false;
             }
         }
         
