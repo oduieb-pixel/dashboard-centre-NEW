@@ -3018,3 +3018,424 @@ function getAchatData(){
 }
 
 function clearAchatCache(){CacheService.getScriptCache().remove(ACHAT_CACHE_KEY);return 'Cache vidé.';}
+// =======================================================================
+// MODULE HOSPITALISATION — SUIVI REA & SOINS INTENSIFS
+// À coller à la fin de Code.gs
+// Feuille source : "BDD_HOSPIT" dans le fichier de l'entité (par entité)
+// Index : "DB_INDEX_HOSPIT" dans le spreadsheet principal
+// =======================================================================
+
+// -----------------------------------------------------------------------
+// CONSTANTES COLONNES BDD_HOSPIT (0-based)
+// sejour_nom | lettre_sous_dossier | patient | org1 | org2 |
+// sejour_entree | sejour_sortie | type_sejour | sous_type_sejour |
+// diagnostic | famille_acte | sous_famille_acte | prestation |
+// discipline | quantite | prix_unit | prix_org | prix_org2 |
+// prix_pat | prix_ttc | prix_ttc_avec_remise | remise_initiale_total |
+// remise_naf_total | lettre_cle | salle_radiologie | date_prestation |
+// source_urgence | operation | chirs | chirs_specialite
+// -----------------------------------------------------------------------
+var HOSPIT_COLS = {
+  SEJOUR_NOM          : 0,
+  LETTRE_SOUS_DOSSIER : 1,
+  PATIENT             : 2,
+  ORG1                : 3,
+  ORG2                : 4,
+  SEJOUR_ENTREE       : 5,
+  SEJOUR_SORTIE       : 6,
+  TYPE_SEJOUR         : 7,
+  SOUS_TYPE_SEJOUR    : 8,
+  DIAGNOSTIC          : 9,
+  FAMILLE_ACTE        : 10,
+  SOUS_FAMILLE_ACTE   : 11,
+  PRESTATION          : 12,
+  DISCIPLINE          : 13,
+  QUANTITE            : 14,
+  PRIX_UNIT           : 15,
+  PRIX_ORG            : 16,
+  PRIX_ORG2           : 17,
+  PRIX_PAT            : 18,
+  PRIX_TTC            : 19,
+  PRIX_TTC_AVEC_REMISE: 20,
+  REMISE_INITIALE     : 21,
+  REMISE_NAF          : 22,
+  LETTRE_CLE          : 23,
+  SALLE_RADIO         : 24,
+  DATE_PRESTATION     : 25,
+  SOURCE_URGENCE      : 26,
+  OPERATION           : 27,
+  CHIRS               : 28,
+  CHIRS_SPECIALITE    : 29
+};
+
+// Prestations ciblées
+var HOSPIT_PRESTATIONS_REA_SEJOUR   = ['SEJOUR EN REANIMATION'];
+var HOSPIT_PRESTATIONS_REA_SURV     = ['SURVEILLANCE REA'];
+var HOSPIT_PRESTATIONS_USI_SEJOUR   = [
+  'SEJOUR SOINS INTENSIFS',
+  'MINI SUITE SOINS INTENSIFS',
+  'SUITE SOINS INTENSIFS',
+  'SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE'
+];
+var HOSPIT_PRESTATIONS_USI_SURV     = ['SURVEILLANCE USI'];
+
+// -----------------------------------------------------------------------
+// HELPERS LOCAUX
+// -----------------------------------------------------------------------
+function hospNum_(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  var s = String(v).replace(/\s/g, '').replace(',', '.');
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function hospDateKey_(v) {
+  if (!v) return null;
+  if (v instanceof Date && !isNaN(v)) {
+    var y = v.getFullYear();
+    var m = String(v.getMonth() + 1).padStart(2, '0');
+    return y + '-' + m;
+  }
+  var s = String(v).trim();
+  if (/^\d{4}-\d{2}/.test(s)) return s.substring(0, 7);
+  var parts = s.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    var d = parts[0], mo = parts[1], yr = parts[2];
+    if (yr.length === 4) return yr + '-' + mo.padStart(2, '0');
+  }
+  return null;
+}
+
+function hospNormPrestation_(v) {
+  return String(v || '').toUpperCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function hospCategorie_(service, totalUnitaire) {
+  // service = 'REA' ou 'USI'
+  if (service === 'REA') {
+    if (totalUnitaire > 3000) return 'A';
+    if (totalUnitaire === 3000) return 'B';
+    if (totalUnitaire > 1500 && totalUnitaire < 3000) return 'C';
+    return 'D'; // <= 1500
+  } else {
+    // USI
+    if (totalUnitaire > 2000) return 'A';
+    if (totalUnitaire === 2000) return 'B';
+    if (totalUnitaire > 1000 && totalUnitaire < 2000) return 'C';
+    return 'D'; // <= 1000
+  }
+}
+
+// -----------------------------------------------------------------------
+// LECTURE DEPUIS LE FICHIER SOURCE (par feuille via DB_INDEX_HOSPIT)
+// -----------------------------------------------------------------------
+
+function getHospitIndexSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('DB_INDEX_HOSPIT');
+  if (!sheet) {
+    sheet = ss.insertSheet('DB_INDEX_HOSPIT');
+    sheet.appendRow(['ENTITE', 'SPREADSHEET_ID', 'SHEET_NAME', 'LAST_UPDATE', 'NB_LIGNES']);
+    sheet.getRange(1, 1, 1, 5).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+// Sauvegarde par lot les lignes Hospitalisation (appelée depuis le front)
+function saveHospitData(cleanData, entity) {
+  if (!cleanData || cleanData.length === 0) return 'Aucune donnée.';
+
+  var ss       = SpreadsheetApp.getActiveSpreadsheet();
+  var idxSheet = getHospitIndexSheet_();
+  var idxData  = idxSheet.getDataRange().getValues();
+
+  // Cherche ou crée le fichier dédié à cette entité
+  var targetId   = null;
+  var rowIndex   = -1;
+  var sheetName  = 'BDD_HOSPIT';
+
+  for (var i = 1; i < idxData.length; i++) {
+    if (String(idxData[i][0]).trim().toUpperCase() === String(entity).trim().toUpperCase()) {
+      targetId  = idxData[i][1];
+      rowIndex  = i + 1;
+      sheetName = idxData[i][2] || 'BDD_HOSPIT';
+      break;
+    }
+  }
+
+  var targetSS;
+  if (targetId) {
+    try {
+      targetSS = SpreadsheetApp.openById(targetId);
+    } catch (e) {
+      return 'Erreur : Impossible d\'ouvrir le fichier Hospit pour ' + entity;
+    }
+  } else {
+    // Créer un nouveau fichier
+    var fileName = 'DB_HOSPIT_' + String(entity).toUpperCase();
+    targetSS = SpreadsheetApp.create(fileName);
+    var newSheet = targetSS.getSheets()[0];
+    newSheet.setName(sheetName);
+    // En-têtes
+    var headers = [
+      'sejour_nom','lettre_sous_dossier','patient','org1','org2',
+      'sejour_entree','sejour_sortie','type_sejour','sous_type_sejour',
+      'diagnostic','famille_acte','sous_famille_acte','prestation',
+      'discipline','quantite','prix_unit','prix_org','prix_org2',
+      'prix_pat','prix_ttc','prix_ttc_avec_remise','remise_initiale_total',
+      'remise_naf_total','lettre_cle','salle_radiologie','date_prestation',
+      'source_urgence','operation','chirs','chirs_specialite'
+    ];
+    newSheet.appendRow(headers);
+    idxSheet.appendRow([entity, targetSS.getId(), sheetName, new Date(), 0]);
+    rowIndex = idxSheet.getLastRow();
+  }
+
+  var targetSheet = targetSS.getSheetByName(sheetName);
+  if (!targetSheet) {
+    targetSheet = targetSS.insertSheet(sheetName);
+  }
+
+  // ── LOGIQUE CUMUL SÉCURISÉ ──
+  // On lit les données existantes, on déduplicte par sejour_nom + date_prestation
+  // puis on ajoute les nouvelles. Ainsi un même dossier n'est pas dupliqué
+  // si on importe deux fois le même fichier.
+
+  var existingRows = [];
+  var lastRow = targetSheet.getLastRow();
+  if (lastRow > 1) {
+    existingRows = targetSheet.getRange(2, 1, lastRow - 1, 30).getValues();
+  }
+
+  // Clés existantes : sejour_nom + date_prestation (colonnes 0 et 25)
+  var existingKeys = new Set();
+  existingRows.forEach(function(r) {
+    var key = String(r[0]).trim() + '|' + String(r[25]).trim();
+    existingKeys.add(key);
+  });
+
+  // Ne garder que les nouvelles lignes
+  var newRows = cleanData.filter(function(r) {
+    var key = String(r[0]).trim() + '|' + String(r[25]).trim();
+    return !existingKeys.has(key);
+  });
+
+  if (newRows.length > 0) {
+    targetSheet.getRange(targetSheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+
+  var totalRows = targetSheet.getLastRow() - 1;
+
+  // MAJ index
+  var now = new Date();
+  if (rowIndex > 0) {
+    idxSheet.getRange(rowIndex, 4).setValue(now);
+    idxSheet.getRange(rowIndex, 5).setValue(totalRows);
+  }
+
+  PropertiesService.getScriptProperties().setProperty('LAST_HOSPIT_UPDATE_' + entity, now.toLocaleString('fr-FR'));
+
+  return 'OK:' + newRows.length + ':' + totalRows;
+}
+
+// -----------------------------------------------------------------------
+// LECTURE + CALCUL (côté backend) — appelée depuis le front
+// -----------------------------------------------------------------------
+function getHospitData() {
+  var user     = getUserContext();
+  var idxSheet = getHospitIndexSheet_();
+  var idxData  = idxSheet.getDataRange().getValues();
+
+  var allRows  = [];
+  var MONTHS_FR = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
+
+  for (var i = 1; i < idxData.length; i++) {
+    var entite   = String(idxData[i][0]).trim();
+    var fileId   = String(idxData[i][1]).trim();
+    var shName   = String(idxData[i][2]).trim() || 'BDD_HOSPIT';
+
+    if (!entityMatchesUser_(entite, user.entity)) continue;
+    if (!fileId) continue;
+
+    try {
+      var extSS    = SpreadsheetApp.openById(fileId);
+      var extSheet = extSS.getSheetByName(shName);
+      if (!extSheet || extSheet.getLastRow() < 2) continue;
+
+      var lr   = extSheet.getLastRow();
+      var lc   = Math.min(extSheet.getLastColumn(), 30);
+      var data = extSheet.getRange(2, 1, lr - 1, lc).getValues();
+
+      data.forEach(function(r) {
+        // Normaliser la date
+        var rawDate = r[HOSPIT_COLS.DATE_PRESTATION];
+        var dateKey = hospDateKey_(rawDate);
+        var annee   = null;
+        var moisFR  = null;
+
+        if (rawDate instanceof Date && !isNaN(rawDate)) {
+          annee  = rawDate.getFullYear();
+          moisFR = MONTHS_FR[rawDate.getMonth()];
+        } else if (dateKey) {
+          annee  = parseInt(dateKey.substring(0, 4), 10);
+          var mo = parseInt(dateKey.substring(5, 7), 10);
+          moisFR = MONTHS_FR[mo - 1] || null;
+        }
+
+        allRows.push({
+          entite          : entite,
+          sejourNom       : String(r[HOSPIT_COLS.SEJOUR_NOM] || '').trim(),
+          patient         : String(r[HOSPIT_COLS.PATIENT]    || '').trim(),
+          familleActe     : hospNormPrestation_(r[HOSPIT_COLS.FAMILLE_ACTE]),
+          prestation      : hospNormPrestation_(r[HOSPIT_COLS.PRESTATION]),
+          quantite        : hospNum_(r[HOSPIT_COLS.QUANTITE]),
+          prixTtcRemise   : hospNum_(r[HOSPIT_COLS.PRIX_TTC_AVEC_REMISE]),
+          dateKey         : dateKey,
+          annee           : annee,
+          moisFR          : moisFR,
+          sejourSortieRaw : rawDate  // pour tri
+        });
+      });
+    } catch (e) {
+      Logger.log('Erreur lecture Hospit ' + entite + ' : ' + e.message);
+    }
+  }
+
+  if (allRows.length === 0) {
+    return {
+      dossiers : [],
+      kpi      : { rea:{}, usi:{} },
+      filters  : { annees:[], mois:[] },
+      lastUpdate: '--/--/----'
+    };
+  }
+
+  // ── CALCUL PAR DOSSIER ──
+  // Pour chaque sejour_nom on calcule :
+  //   - prixUnitaireSejour (ligne SEJOUR)  = prix_ttc_avec_remise
+  //   - prixUnitaireSurv   (ligne SURV)    = prix_ttc_avec_remise / quantite
+  //   - totalUnitaire = sejour + surv
+  //   - service (REA / USI)
+  //   - categorie (A/B/C/D)
+
+  var dossiersMap = {};
+
+  allRows.forEach(function(r) {
+    var sn = r.sejourNom;
+    if (!sn) return;
+    if (!dossiersMap[sn]) {
+      dossiersMap[sn] = {
+        sejourNom    : sn,
+        patient      : r.patient,
+        entite       : r.entite,
+        service      : null,         // 'REA' ou 'USI'
+        dateKey      : r.dateKey,
+        annee        : r.annee,
+        moisFR       : r.moisFR,
+        sejour       : 0,            // prix unitaire séjour (une nuit)
+        surv         : 0,            // prix unitaire surveillance
+        nuitees      : 0,            // nb lignes séjour = nb nuits
+        hasSejour    : false,
+        hasSurv      : false,
+        totalUnitaire: 0,
+        categorie    : null
+      };
+    }
+    var d = dossiersMap[sn];
+
+    // Date : prendre la date la plus récente (sortie)
+    if (r.dateKey && (!d.dateKey || r.dateKey > d.dateKey)) {
+      d.dateKey = r.dateKey;
+      d.annee   = r.annee;
+      d.moisFR  = r.moisFR;
+    }
+
+    var fam  = r.familleActe;
+    var pres = r.prestation;
+
+    // ── REA SÉJOUR ──
+    if (fam === 'SEJOUR' && HOSPIT_PRESTATIONS_REA_SEJOUR.indexOf(pres) > -1) {
+      d.service   = 'REA';
+      d.sejour    = r.prixTtcRemise; // une nuit = une ligne, montant direct
+      d.nuitees  += 1;
+      d.hasSejour = true;
+    }
+    // ── REA SURVEILLANCE ──
+    else if (HOSPIT_PRESTATIONS_REA_SURV.indexOf(pres) > -1) {
+      if (!d.service) d.service = 'REA';
+      d.surv    = r.quantite > 0 ? r.prixTtcRemise / r.quantite : r.prixTtcRemise;
+      d.hasSurv = true;
+    }
+    // ── USI SÉJOUR ──
+    else if (fam === 'SEJOUR' && HOSPIT_PRESTATIONS_USI_SEJOUR.indexOf(pres) > -1) {
+      d.service   = 'USI';
+      d.sejour    = r.prixTtcRemise;
+      d.nuitees  += 1;
+      d.hasSejour = true;
+    }
+    // ── USI SURVEILLANCE ──
+    else if (HOSPIT_PRESTATIONS_USI_SURV.indexOf(pres) > -1) {
+      if (!d.service) d.service = 'USI';
+      d.surv    = r.quantite > 0 ? r.prixTtcRemise / r.quantite : r.prixTtcRemise;
+      d.hasSurv = true;
+    }
+  });
+
+  // Calcul totalUnitaire + catégorie
+  var dossiers = Object.values(dossiersMap).filter(function(d) {
+    return d.service !== null;
+  });
+
+  dossiers.forEach(function(d) {
+    d.totalUnitaire = d.sejour + d.surv;
+    d.categorie     = hospCategorie_(d.service, d.totalUnitaire);
+  });
+
+  // ── FILTRES DISPONIBLES ──
+  var anneesSet = new Set();
+  var moisSet   = {};
+  dossiers.forEach(function(d) {
+    if (d.annee)  anneesSet.add(d.annee);
+    if (d.moisFR) moisSet[d.moisFR] = 1;
+  });
+
+  var MONTHS_ORDER = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
+  var moisDispos = MONTHS_ORDER.filter(function(m) { return moisSet[m]; });
+
+  // ── KPIs GLOBAUX ──
+  function buildKpi(service) {
+    var rows = dossiers.filter(function(d) { return d.service === service; });
+    var byCateg = {A:0, B:0, C:0, D:0};
+    var caTotale = 0;
+    rows.forEach(function(d) {
+      byCateg[d.categorie] = (byCateg[d.categorie] || 0) + 1;
+      caTotale += d.totalUnitaire * d.nuitees;
+    });
+    var total = rows.length;
+    return {
+      nbDossiers  : total,
+      nbNuitees   : rows.reduce(function(s, d) { return s + d.nuitees; }, 0),
+      caTotale    : caTotale,
+      byCateg     : byCateg,
+      pctA        : total ? Math.round(byCateg.A * 100 / total) : 0,
+      pctB        : total ? Math.round(byCateg.B * 100 / total) : 0,
+      pctC        : total ? Math.round(byCateg.C * 100 / total) : 0,
+      pctD        : total ? Math.round(byCateg.D * 100 / total) : 0
+    };
+  }
+
+  var lastUpdate = '--/--/----';
+  try {
+    var p = PropertiesService.getScriptProperties().getProperty('LAST_HOSPIT_UPDATE_' + (user.entity === 'ALL' ? 'ALL' : user.entity));
+    if (p) lastUpdate = p;
+  } catch(e) {}
+
+  return {
+    dossiers  : dossiers,
+    kpi       : { rea: buildKpi('REA'), usi: buildKpi('USI') },
+    filters   : { annees: Array.from(anneesSet).sort(), mois: moisDispos },
+    lastUpdate: lastUpdate
+  };
+}
