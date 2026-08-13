@@ -445,6 +445,7 @@
           <button class="slim-nav-item" onclick="slimSwitchTab('honoraires', this)" title="Honoraires"><i class="fas fa-user-md"></i><span>Honos</span></button>
           <button class="slim-nav-item" onclick="slimSwitchTab('rh', this)" title="Ressources Humaines"><i class="fas fa-users"></i><span>RH</span></button>
           <button class="slim-nav-item" onclick="slimSwitchTab('achat', this)" title="Gestion des Achats"><i class="fas fa-shopping-cart"></i><span>Achats</span></button>
+          <button class="slim-nav-item" onclick="slimSwitchTab('hospitalisation', this)" title="Suivi Hospitalisation"><i class="fas fa-hospital"></i><span>Hospit</span></button>
         </div>
         <div class="slim-bottom">
           <img id="connectedUserPhoto" class="slim-avatar" src="" alt="Profil">
@@ -526,6 +527,7 @@
             <?!= include('part_honoraires'); ?>
             <?!= include('part_rh'); ?>
             <?!= include('part_achat'); ?>
+            <?!= include('part_hospitalisation'); ?>
           </div>
         </div>
       </div>
@@ -552,6 +554,7 @@
       <button class="mob-nav-item" onclick="slimSwitchTab('recouvrement', this)"><i class="fas fa-file-invoice-dollar"></i>Recouv</button>
       <button class="mob-nav-item" onclick="slimSwitchTab('expedition', this)"><i class="fas fa-truck"></i>Exped</button>
       <button class="mob-nav-item" onclick="slimSwitchTab('rh', this)"><i class="fas fa-users"></i>RH</button>
+      <button class="mob-nav-item" onclick="slimSwitchTab('hospitalisation', this)"><i class="fas fa-hospital"></i>Hospit</button>
     </div>
 
     <?!= include('js_global'); ?>
@@ -572,6 +575,7 @@
     <?!= include('js_honoraires_override'); ?>
     <?!= include('js_rh'); ?>
     <?!= include('js_achat'); ?>
+<?!= include('js_hospitalisation'); ?>
 
     <script>
     /* ============================================ */
@@ -587,7 +591,8 @@
       'flash': 'Flash Activité', 'ca-budget': 'CA vs Budget',
       'recouvrement': 'Recouvrement', 'expedition': 'Expedition',
       'depenses': 'Dépenses Caisses', 'honoraires': 'Honoraires Médecins',
-      'rh': 'Ressources Humaines', 'achat': 'Gestion des Achats',
+      'rh': 'Ressources Humaines', 
+      'hospitalisation': 'Suivi Hospitalisation',
     };
 
     /* ============================================ */
@@ -829,6 +834,9 @@
       } else if (tabName === 'recouvrement') {
         if (typeof switchTab === 'function') switchTab('recouvrement');
         setTimeout(function() { if (typeof switchFamily === 'function') switchFamily('Recouvrement', 'Dossiers non réglés', document.querySelector('.nav-sub-btn')); }, 300);
+      } else if (tabName === 'hospitalisation') {
+        if (typeof switchTab === 'function') switchTab(tabName);
+        if (typeof loadHospitData === 'function') loadHospitData();
       } else {
         if (typeof switchTab === 'function') switchTab(tabName);
       }

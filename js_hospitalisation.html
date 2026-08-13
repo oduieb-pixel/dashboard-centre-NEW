@@ -1,0 +1,318 @@
+<script>
+/**
+ * MODULE HOSPITALISATION — v13 FINALE
+ * Corrigé sur fichier réel : dates format US court, surveillance dans HONORAIRE MEDECIN
+ */
+
+var globalHospitData   = [];
+var filteredHospitData = [];
+var hospChartDonutInst = null;
+var hospChartBarInst   = null;
+var hospBarService     = 'ALL';
+var HOSPIT_MOIS_ORDER  = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
+
+var PRES_REA_SEJ  = ['SEJOUR EN REANIMATION'];
+var PRES_USI_SEJ  = ['SEJOUR SOINS INTENSIFS','MINI SUITE SOINS INTENSIFS','SUITE SOINS INTENSIFS','SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE'];
+// Surveillance dans HONORAIRE MEDECIN (prestation directe) OU PRESTATIONS
+var PRES_REA_SURV = ['SURVEILLANCE REA','COMPLEMENT REANIMATION'];
+var PRES_USI_SURV = ['SURVEILLANCE USI','COMPLEMENT SOINS INTENSIFS'];
+
+// =======================================================================
+// CHARGEMENT
+// =======================================================================
+function loadHospitData() {
+  showLoadingOverlay('Chargement Hospitalisation 2026…');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoadingOverlay();
+      globalHospitData = res.dossiers || [];
+      var selM = document.getElementById('hospFilterMois');
+      if (selM) {
+        selM.innerHTML = '<option value="">TOUT</option>';
+        (res.filters.mois||[]).forEach(function(m){ selM.innerHTML += '<option value="'+m+'">'+m+'</option>'; });
+      }
+      var el = document.getElementById('hospLastUpdate');
+      if (el && res.lastUpdate) el.textContent = 'Date d\'actualisation : ' + res.lastUpdate;
+      applyHospitFilters();
+    })
+    .withFailureHandler(function(err) { hideLoadingOverlay(); alert('Erreur chargement : '+(err.message||err)); })
+    .getHospitData();
+}
+
+// =======================================================================
+// FILTRAGE
+// =======================================================================
+function applyHospitFilters() {
+  var service=(document.getElementById('hospFilterService')||{}).value||'';
+  var mois=(document.getElementById('hospFilterMois')||{}).value||'';
+  var categ=(document.getElementById('hospFilterCateg')||{}).value||'';
+  filteredHospitData=globalHospitData.filter(function(d){
+    if(service&&d.service!==service)return false;
+    if(mois&&d.moisFR!==mois)return false;
+    if(categ&&d.categorie!==categ)return false;
+    return true;
+  });
+  renderHospitKpis();renderHospitCharts();renderHospitTable();
+}
+
+// =======================================================================
+// KPIs
+// =======================================================================
+function renderHospitKpis(){
+  function buildKpi(svc){
+    var rows=filteredHospitData.filter(function(d){return d.service===svc;});
+    var byC={A:0,B:0,C:0,D:0},nuit=0,pats={};
+    rows.forEach(function(d){byC[d.categorie]=(byC[d.categorie]||0)+1;nuit+=d.nuitees||0;if(d.patient&&d.patient!=='–')pats[d.patient]=true;});
+    return{nb:rows.length,nuit:nuit,patients:Object.keys(pats).length,byC:byC};
+  }
+  var rea=buildKpi('REA'),usi=buildKpi('USI'),el;
+  el=document.getElementById('kpiReaDossiers');if(el)el.textContent=rea.nb.toLocaleString('fr-FR');
+  el=document.getElementById('kpiReaNuitees');if(el)el.innerHTML='Nuitées : <strong>'+rea.nuit.toLocaleString('fr-FR')+'</strong>&nbsp;&nbsp;|&nbsp;&nbsp;Patients : <strong>'+rea.patients.toLocaleString('fr-FR')+'</strong>';
+  el=document.getElementById('kpiReaCateg');if(el)el.innerHTML=buildCategHtml(rea);
+  el=document.getElementById('kpiUsiDossiers');if(el)el.textContent=usi.nb.toLocaleString('fr-FR');
+  el=document.getElementById('kpiUsiNuitees');if(el)el.innerHTML='Nuitées : <strong>'+usi.nuit.toLocaleString('fr-FR')+'</strong>&nbsp;&nbsp;|&nbsp;&nbsp;Patients : <strong>'+usi.patients.toLocaleString('fr-FR')+'</strong>';
+  el=document.getElementById('kpiUsiCateg');if(el)el.innerHTML=buildCategHtml(usi);
+}
+
+function buildCategHtml(kpi){
+  var total=kpi.nb,COLORS={A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'},BG={A:'#d1fae5',B:'#e0e7ff',C:'#fef3c7',D:'#fee2e2'};
+  return['A','B','C','D'].map(function(c){var n=kpi.byC[c]||0,p=total?Math.round(n*100/total):0;return'<span style="display:inline-flex;align-items:center;gap:4px;background:'+BG[c]+';color:'+COLORS[c]+';padding:3px 9px;border-radius:20px;font-weight:800;font-size:.9em;margin:2px;">Cat.'+c+' : '+n+' <span style="font-weight:600;opacity:.75;">('+p+'%)</span></span>';}).join('');
+}
+
+// =======================================================================
+// GRAPHIQUES
+// =======================================================================
+function renderHospitCharts(){renderHospitDonut();renderHospitBar();}
+
+function setHospitChartService(svc){
+  hospBarService=svc;
+  ['ALL','REA','USI'].forEach(function(s){var btn=document.getElementById('btnHosp'+(s==='ALL'?'All':s==='REA'?'Rea':'Usi'));if(btn)btn.classList.toggle('active',s===svc);});
+  renderHospitBar();
+}
+
+function renderHospitDonut(){
+  var ctx=document.getElementById('chartHospitDonut');if(!ctx)return;
+  if(hospChartDonutInst){hospChartDonutInst.destroy();hospChartDonutInst=null;}
+  var C={A:0,B:0,C:0,D:0};filteredHospitData.forEach(function(d){C[d.categorie]=(C[d.categorie]||0)+1;});var T=C.A+C.B+C.C+C.D;
+  hospChartDonutInst=new Chart(ctx.getContext('2d'),{type:'doughnut',data:{labels:['Catégorie A','Catégorie B','Catégorie C','Catégorie D'],datasets:[{data:[C.A,C.B,C.C,C.D],backgroundColor:['#10b981','#6366f1','#f59e0b','#ef4444'],borderWidth:3,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{usePointStyle:true,pointStyle:'circle',padding:12,font:{size:11,weight:'700'}}},datalabels:{color:'#fff',font:{weight:'800',size:12},formatter:function(v){return T?Math.round(v*100/T)+'%':'';}},tooltip:{callbacks:{label:function(c){return' '+c.label+' : '+c.raw+' dossier(s)';}}}}}}); 
+}
+
+function renderHospitBar(){
+  var ctx=document.getElementById('chartHospitBar');if(!ctx)return;
+  if(hospChartBarInst){hospChartBarInst.destroy();hospChartBarInst=null;}
+  var src=hospBarService==='ALL'?filteredHospitData:filteredHospitData.filter(function(d){return d.service===hospBarService;});
+  var mSet={};src.forEach(function(d){if(d.moisFR)mSet[d.moisFR]=true;});
+  var labels=HOSPIT_MOIS_ORDER.filter(function(m){return mSet[m];});
+  var byM={};labels.forEach(function(m){byM[m]={A:0,B:0,C:0,D:0};});
+  src.forEach(function(d){if(d.moisFR&&byM[d.moisFR])byM[d.moisFR][d.categorie]++;});
+  function ds(c,col){return{label:'Cat. '+c,data:labels.map(function(m){return byM[m][c]||0;}),backgroundColor:col,borderRadius:6,borderSkipped:false,stack:'s'};}
+  hospChartBarInst=new Chart(ctx.getContext('2d'),{type:'bar',data:{labels:labels,datasets:[ds('D','#ef4444'),ds('C','#f59e0b'),ds('B','#6366f1'),ds('A','#10b981')]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',align:'end',labels:{usePointStyle:true,pointStyle:'rectRounded',padding:12,font:{size:11,weight:'700'}}},datalabels:{display:false},tooltip:{mode:'index',intersect:false}},scales:{x:{grid:{display:false},border:{display:false},ticks:{font:{size:11,weight:'700'}}},y:{beginAtZero:true,grid:{color:'#f1f5f9'},border:{display:false},ticks:{precision:0,font:{size:11}}}}}});
+}
+
+// =======================================================================
+// TABLEAU
+// =======================================================================
+function renderHospitTable(){
+  var tbody=document.getElementById('hospTableBody'),countEl=document.getElementById('hospTableCount');if(!tbody)return;
+  var search=((document.getElementById('hospSearchInput')||{}).value||'').toLowerCase().trim();
+  var data=filteredHospitData.slice();
+  if(search)data=data.filter(function(d){return(d.sejourNom||'').toLowerCase().indexOf(search)>-1||(d.patient||'').toLowerCase().indexOf(search)>-1;});
+  data.sort(function(a,b){if(!a.dateKey&&!b.dateKey)return 0;if(!a.dateKey)return 1;if(!b.dateKey)return -1;return b.dateKey.localeCompare(a.dateKey);});
+  if(countEl)countEl.textContent=data.length+' dossier(s)';
+  var SVCBG={REA:'#ede9fe',USI:'#e0f2fe'},SVCCL={REA:'#7c3aed',USI:'#0369a1'};
+  var CB={A:'background:#d1fae5;color:#065f46',B:'background:#e0e7ff;color:#3730a3',C:'background:#fef3c7;color:#92400e',D:'background:#fee2e2;color:#991b1b'};
+  var html='';
+  data.forEach(function(d){
+    var ml=d.moisFR?d.moisFR+' 2026':'–';
+    var ss='background:'+(SVCBG[d.service]||'#f1f5f9')+';color:'+(SVCCL[d.service]||'#64748b')+';padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;';
+    var cs=(CB[d.categorie]||'background:#f1f5f9;color:#64748b')+';display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;font-size:12px;font-weight:800;';
+    html+='<tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8f9fd\'" onmouseout="this.style.background=\'\'">'+
+      '<td style="padding:9px 12px;font-weight:700;color:#6366f1;">'+(d.sejourNom||'–')+'</td>'+
+      '<td style="padding:9px 12px;">'+(d.patient||'–')+'</td>'+
+      '<td style="padding:9px 12px;"><span style="'+ss+'">'+(d.service||'–')+'</span></td>'+
+      '<td style="padding:9px 12px;color:#64748b;font-weight:600;">'+ml+'</td>'+
+      '<td style="padding:9px 12px;text-align:right;font-weight:700;">'+(d.nuitees||0).toLocaleString('fr-FR')+'</td>'+
+      '<td style="padding:9px 12px;text-align:right;">'+Math.round(d.sejour||0).toLocaleString('fr-FR')+'</td>'+
+      '<td style="padding:9px 12px;text-align:right;">'+Math.round(d.medecin||0).toLocaleString('fr-FR')+'</td>'+
+      '<td style="padding:9px 12px;text-align:right;">'+Math.round(d.surv||0).toLocaleString('fr-FR')+'</td>'+
+      '<td style="padding:9px 12px;text-align:right;font-weight:800;color:#1e293b;">'+Math.round(d.totalUnitaire||0).toLocaleString('fr-FR')+'</td>'+
+      '<td style="padding:9px 12px;text-align:center;"><span style="'+cs+'">'+d.categorie+'</span></td>'+
+      '</tr>';
+  });
+  tbody.innerHTML=html||'<tr><td colspan="10" style="padding:30px;text-align:center;color:#94a3b8;font-weight:600;">Aucun dossier trouvé</td></tr>';
+}
+
+// =======================================================================
+// PARSER DATE — tous formats
+// =======================================================================
+function hospParseDate(val){
+  if(val===null||val===undefined||val==='') return null;
+  // Objet Date JS
+  if(val instanceof Date){if(isNaN(val.getTime()))return null;return val.getFullYear()+'-'+String(val.getMonth()+1).padStart(2,'0');}
+  var s=String(val).trim();
+  if(!s||s==='NULL'||s==='None'||s==='0') return null;
+  // YYYY-MM-DD
+  var m1=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m1)return m1[1]+'-'+m1[2];
+  // DD/MM/YYYY
+  var m2=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);if(m2)return m2[3]+'-'+m2[2];
+  // Format US court : 5/15/26 0:00 ou 1/6/2026
+  var m3=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if(m3){var yr=parseInt(m3[3]);if(yr<100)yr+=2000;return yr+'-'+String(m3[1]).padStart(2,'0');}
+  // Nombre sériel Excel
+  var n=parseFloat(s);
+  if(!isNaN(n)&&n>40000&&n<60000){var d=new Date((n-25569)*86400000);var yr2=d.getUTCFullYear();if(yr2>=2020&&yr2<=2030)return yr2+'-'+String(d.getUTCMonth()+1).padStart(2,'0');}
+  return null;
+}
+
+function hospNormStr(v){return String(v===null||v===undefined?'':v).toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+
+// =======================================================================
+// IMPORT
+// =======================================================================
+function handleHospitFiles(files){
+  if(!files||files.length===0)return;
+  var display=document.getElementById('hospImportDisplay');
+  if(display)display.textContent='Traitement…';
+  var idx=0;
+  function next(){
+    if(idx>=files.length){if(display)display.textContent='Terminé !';loadHospitData();var fi=document.getElementById('fileHospitalisation');if(fi)fi.value='';return;}
+    processOneHospitFile(files[idx],display,function(){idx++;next();});
+  }
+  next();
+}
+
+function processOneHospitFile(file,display,onDone){
+  var entity=detectHospitEntity(file.name);
+  if(!entity){alert('Entité non détectée.\nRenomme avec CIK, HIIN, CSS, CIOB, CIMO ou HPB.');onDone();return;}
+  if(display)display.textContent='Lecture '+file.name+'…';
+
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true,raw:false,defval:''});
+      var sheet=wb.Sheets[wb.SheetNames[0]];
+      var rawJson=XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:'',blankrows:false});
+// Vérifier que chaque ligne a le bon nombre de colonnes
+var nbCols = rawJson[0] ? rawJson[0].length : 0;
+rawJson = rawJson.map(function(row){
+  while(row.length < nbCols) row.push('');
+  return row;
+});
+
+      if(!rawJson||rawJson.length<2){alert('Fichier vide.');onDone();return;}
+
+      // Trouver l'en-tête
+      var hIdx=-1;
+      for(var r=0;r<Math.min(rawJson.length,5);r++){
+        var norm=rawJson[r].map(function(c){return String(c||'').toLowerCase().trim().replace(/\s+/g,'_');});
+        if(norm.indexOf('sejour_nom')>-1||norm.indexOf('famille_acte')>-1){hIdx=r;break;}
+      }
+      if(hIdx===-1){alert('En-tête introuvable.');onDone();return;}
+
+      var hRow=rawJson[hIdx].map(function(h){return String(h||'').toLowerCase().trim().replace(/\s+/g,'_');});
+
+      var iSN=hRow.indexOf('sejour_nom'),iPat=hRow.indexOf('patient');
+      var iFam=hRow.indexOf('famille_acte'),iPres=hRow.indexOf('prestation');
+      var iCobs=hRow.indexOf('cotation_observation'),iDate=hRow.indexOf('date_prestation');
+
+      if(iFam===-1||iPres===-1||iDate===-1){
+        alert('Colonnes manquantes :\n'+(iFam===-1?'- famille_acte\n':'')+(iPres===-1?'- prestation\n':'')+(iDate===-1?'- date_prestation\n':''));
+        onDone();return;
+      }
+
+      var KEEP=['sejour_nom','lettre_sous_dossier','patient','org1','org2',
+                'type_sejour','sous_type_sejour','diagnostic','medecin_traitant',
+                'famille_acte','prestation','discipline','quantite','prix_unit',
+                'prix_ttc','prix_ttc_avec_remise','salle_radiologie','cotation_observation',
+                'date_prestation','operation','chirs_specialite'];
+      var keepIdx=KEEP.map(function(col){var i=hRow.indexOf(col);return i>=0?i:-1;});
+
+      var nowD=new Date(),nowDK=nowD.getFullYear()+'-'+String(nowD.getMonth()+1).padStart(2,'0');
+      var dataRows=rawJson.slice(hIdx+1),cleanData=[],moisImporte=null;
+
+      dataRows.forEach(function(row){
+        if(!row||row.length<5)return;
+        var get=function(i){
+          if(i<0||i>=row.length)return'';
+          var v=row[i];
+          if(v===null||v===undefined)return'';
+          if(v instanceof Date){return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');}
+          return String(v).trim();
+        };
+
+        var rawDate=get(iDate);
+        var dk=hospParseDate(rawDate);
+        if(!dk)return;
+        if(dk.substring(0,4)!=='2026')return;
+        if(dk>nowDK)return;
+        if(!moisImporte)moisImporte=dk;
+
+        var fam=hospNormStr(get(iFam));
+        var pres=hospNormStr(get(iPres));
+        var cobs=hospNormStr(get(iCobs));
+
+        var isReaSej=fam==='SEJOUR'&&PRES_REA_SEJ.indexOf(pres)>-1;
+        var isUsiSej=fam==='SEJOUR'&&PRES_USI_SEJ.indexOf(pres)>-1;
+        // Surveillance : par nom de prestation (indépendant de famille_acte)
+        var isReaSurv=PRES_REA_SURV.indexOf(pres)>-1;
+        var isUsiSurv=PRES_USI_SURV.indexOf(pres)>-1;
+        // Médecin : HONORAIRE MEDECIN + cotation_observation contient SUIVI REA/USI
+        var isReaMed=fam==='HONORAIRE MEDECIN'&&cobs.indexOf('SUIVI REA')>-1;
+        var isUsiMed=fam==='HONORAIRE MEDECIN'&&cobs.indexOf('SUIVI USI')>-1;
+
+        if(!isReaSej&&!isUsiSej&&!isReaSurv&&!isUsiSurv&&!isReaMed&&!isUsiMed)return;
+
+        var filteredRow=keepIdx.map(function(i){return get(i);});
+        cleanData.push(filteredRow);
+      });
+
+      if(cleanData.length===0){
+        var debugDates=[];
+        for(var i=0;i<Math.min(dataRows.length,5);i++){
+          if(dataRows[i]&&iDate<dataRows[i].length)debugDates.push(typeof dataRows[i][iDate]+':'+String(dataRows[i][iDate]));
+        }
+        alert('Aucune ligne REA/USI 2026.\n\nDates lues :\n'+debugDates.join('\n'));
+        onDone();return;
+      }
+
+      if(display)display.textContent='Envoi '+entity+' ('+cleanData.length+' lignes)…';
+      var CHUNK=2000,total=cleanData.length,i=0,premierChunk=true;
+      function sendNext(){
+        if(i>=total){if(display)display.textContent='✅ '+total.toLocaleString('fr-FR')+' lignes ('+moisImporte+')';onDone();return;}
+        var chunk=cleanData.slice(i,i+CHUNK);
+        var pct=Math.min(100,Math.round(((i+chunk.length)/total)*100));
+        if(display)display.textContent='Envoi '+entity+' ('+pct+'%)…';
+        var moisPour=premierChunk?moisImporte:null;
+        premierChunk=false;i+=CHUNK;
+        google.script.run
+          .withSuccessHandler(sendNext)
+          .withFailureHandler(function(err){alert('Erreur : '+err.message);onDone();})
+          .saveHospitChunk(chunk,entity,moisPour);
+      }
+      sendNext();
+    }catch(err){alert('Erreur lecture : '+err.message);onDone();}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function detectHospitEntity(name){
+  var n=name.toUpperCase();
+  if(n.indexOf('HIIN')>-1)return'HIIN';
+  if(n.indexOf('CSS')>-1||n.indexOf('SAFI')>-1)return'CSS';
+  if(n.indexOf('CIOB')>-1||n.indexOf('BENGUERIR')>-1)return'CIOB';
+  if(n.indexOf('CIMO')>-1||n.indexOf('ESSAOUIRA')>-1)return'CIMO';
+  if(n.indexOf('HPB')>-1||n.indexOf('MELLAL')>-1)return'HPB';
+  if(n.indexOf('CIK')>-1||n.indexOf('KHOURIBGA')>-1)return'CIK';
+  return null;
+}
+
+function exportHospitExcel(){
+  if(!filteredHospitData.length){alert('Aucune donnée.');return;}
+  var rows=[['Dossier','Patient','Service','Mois','Nuitées','Séjour unit.','Médecin unit.','Surv. unit.','Total unit.','Catégorie']];
+  filteredHospitData.forEach(function(d){rows.push([d.sejourNom||'',d.patient||'',d.service||'',(d.moisFR||'')+' 2026',d.nuitees||0,Math.round(d.sejour||0),Math.round(d.medecin||0),Math.round(d.surv||0),Math.round(d.totalUnitaire||0),d.categorie||'']);});
+  var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Hospitalisation');XLSX.writeFile(wb,'Suivi_Hospitalisation_2026.xlsx');
+}
+
+function showLoadingOverlay(msg){var ov=document.getElementById('loadingOverlay'),tx=document.getElementById('loadingText');if(ov)ov.style.display='flex';if(tx&&msg)tx.textContent=msg;}
+function hideLoadingOverlay(){var ov=document.getElementById('loadingOverlay');if(ov)ov.style.display='none';}
+</script>
