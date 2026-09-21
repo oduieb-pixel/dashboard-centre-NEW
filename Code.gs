@@ -3019,9 +3019,8 @@ function getAchatData(){
 
 function clearAchatCache(){CacheService.getScriptCache().remove(ACHAT_CACHE_KEY);return 'Cache vidé.';}
 // =======================================================================
-// MODULE HOSPITALISATION — BACKEND V11
-// Médecin : discipline=ANESTHESIE-REANIMATION + quantite = nuitées service
-// Filtre entité ajouté côté front
+// MODULE HOSPITALISATION — BACKEND V12 (VERSION FACTURABLE)
+// Coût unitaire = (séjour + surveillance) / nuitées — médecin exclu, sans arrondi OCP
 // =======================================================================
 
 var HOSPIT_SOURCE_SHEETS = {
@@ -3029,24 +3028,22 @@ var HOSPIT_SOURCE_SHEETS = {
   'HIIN': '', 'CSS':'', 'CIOB':'', 'CIMO':'', 'HPB':''
 };
 
-// Positions dans fichier source (0-based, confirmées)
+// Positions dans fichier source FACTURABLE (0-based, confirmées)
 var SRC = {
-  SEJOUR_NUM:0, SEJOUR_NOM:1, PATIENT:3, ORG1:4,
-  FAMILLE_ACTE:24, PRESTATION:26, DISCIPLINE:27,
-  QUANTITE:30, PRIX:36, COTATION_OBS:41, DATE_PREST:45
+  SEJOUR_NUM:6, SEJOUR_NOM:7, PATIENT:9, ORG1:10,
+  FAMILLE_ACTE:30, PRESTATION:32,
+  QUANTITE:35, PRIX:41, DATE_PREST:50
 };
 
 // Colonnes stockées en base
 var DB_COLS = [
   'sejour_num','sejour_nom','patient','org1','famille_acte',
-  'prestation','discipline','quantite','prix_ttc_avec_remise',
-  'cotation_observation','date_prestation','entite'
+  'prestation','quantite','prix_ttc_avec_remise','date_prestation','entite'
 ];
 
 var DB = {
   SEJOUR_NUM:0, SEJOUR_NOM:1, PATIENT:2, ORG1:3, FAMILLE_ACTE:4,
-  PRESTATION:5, DISCIPLINE:6, QUANTITE:7, PRIX:8,
-  COTATION_OBS:9, DATE_PREST:10, ENTITE:11
+  PRESTATION:5, QUANTITE:6, PRIX:7, DATE_PREST:8, ENTITE:9
 };
 
 var PRES_REA_SEJ  = ['SEJOUR EN REANIMATION'];
@@ -3084,21 +3081,6 @@ function hGet(row,i){
   var v=row[i];if(v===null||v===undefined)return'';
   if(v instanceof Date)return hDateKey(v)||'';
   return String(v).trim();
-}
-function hIsOCP(org1){
-  var o=String(org1||'').toUpperCase();
-  return o.indexOf('OCP')>-1;
-}
-
-function hArrondiOCP(svc,total){
-  if(svc==='REA'){
-    if(total>=1400&&total<1500) return 1500;
-    if(total>=2900&&total<3000) return 3000;
-  } else {
-    if(total>=900&&total<1000)  return 1000;
-    if(total>=1900&&total<2000) return 2000;
-  }
-  return total;
 }
 
 function hCateg(svc,total){
@@ -3152,7 +3134,7 @@ function importHospitFromSheet(entity){
     for(var start=2;start<=lr;start+=BATCH){
       var rows=src.getRange(start,1,Math.min(start+BATCH-1,lr)-start+1,lc).getValues();
       rows.forEach(function(row){
-        if(row.length<46)return;
+        if(row.length<51)return;
         var dk=hDateKey(row[SRC.DATE_PREST]);
         if(!dk||dk.substring(0,4)!=='2026'||dk>nowDK)return;
         var fam=hNorm(row[SRC.FAMILLE_ACTE]);
@@ -3163,27 +3145,23 @@ function importHospitFromSheet(entity){
       });
     }
 
-    // Passe 2 : collecter toutes les lignes utiles des dossiers valides
+    // Passe 2 : collecter les lignes SEJOUR + SURVEILLANCE des dossiers valides
     for(var start=2;start<=lr;start+=BATCH){
       var rows=src.getRange(start,1,Math.min(start+BATCH-1,lr)-start+1,lc).getValues();
       rows.forEach(function(row){
-        if(row.length<46)return;
+        if(row.length<51)return;
         var snom=hGet(row,SRC.SEJOUR_NOM);
-        if(!validSejours[snom])return; // Ignorer dossiers sans séjour REA/USI
+        if(!validSejours[snom])return;
         var dk=hDateKey(row[SRC.DATE_PREST]);
         if(!dk||dk.substring(0,4)!=='2026'||dk>nowDK)return;
         var fam=hNorm(row[SRC.FAMILLE_ACTE]);
         var pres=hNorm(row[SRC.PRESTATION]);
-        var disc=hNorm(row[SRC.DISCIPLINE]);
-        var cobs=hNorm(row[SRC.COTATION_OBS]);
         var ok=(fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1))
-             ||PRES_REA_SURV.indexOf(pres)>-1||PRES_USI_SURV.indexOf(pres)>-1
-             ||(fam==='HONORAIRE MEDECIN'&&(cobs.indexOf('SUIVI REA')>-1||cobs.indexOf('SUIVI USI')>-1))
-             ||(fam==='HONORAIRE MEDECIN'&&disc==='ANESTHESIE-REANIMATION');
+             ||PRES_REA_SURV.indexOf(pres)>-1||PRES_USI_SURV.indexOf(pres)>-1;
         if(!ok)return;
         clean.push([hGet(row,SRC.SEJOUR_NUM),snom,hGet(row,SRC.PATIENT),
-          hGet(row,SRC.ORG1),fam,pres,disc,hGet(row,SRC.QUANTITE),
-          hGet(row,SRC.PRIX),cobs,dk,entity]);
+          hGet(row,SRC.ORG1),fam,pres,hGet(row,SRC.QUANTITE),
+          hGet(row,SRC.PRIX),dk,entity]);
       });
     }
     if(clean.length===0)return{error:'Aucune ligne REA/USI 2026 trouvée'};
@@ -3223,13 +3201,10 @@ function getHospitData(){
   var user=getUserContext(),idx=getHospIdx(),idxData=idx.getDataRange().getValues();
   var now=new Date(),nowDK=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
 
-  // Passe 1 : collecter toutes les lignes par dossier
   var rawMap={};
-
-  function getRaw(sn,snum){
-    if(!rawMap[sn])rawMap[sn]={snum:snum,patients:{},
-      rea_sej:[],usi_sej:[],rea_surv:[],usi_surv:[],
-      rea_med_cobs:[],usi_med_cobs:[],anest:[]};
+  function getRaw(sn){
+    if(!rawMap[sn])rawMap[sn]={snum:'',entite:'',org1:'',patients:{},
+      rea_sej:[],usi_sej:[],rea_surv:[],usi_surv:[]};
     return rawMap[sn];
   }
 
@@ -3238,7 +3213,6 @@ function getHospitData(){
     var fileId=String(idxData[i][1]).trim();
     var shName=String(idxData[i][2]).trim()||'BDD_HOSPIT';
     if(!entityMatchesUser_(entite,user.entity))continue;
-    var entiteCode=entite; // Pour retourner l'entité dans chaque dossier
     if(!fileId)continue;
     try{
       var extSS=SpreadsheetApp.openById(fileId);
@@ -3252,8 +3226,6 @@ function getHospitData(){
         var pat =String(r[DB.PATIENT]||'').trim();
         var fam =hNorm(r[DB.FAMILLE_ACTE]);
         var pres=hNorm(r[DB.PRESTATION]);
-        var disc=hNorm(r[DB.DISCIPLINE]);
-        var cobs=hNorm(r[DB.COTATION_OBS]);
         var qte =hNum(r[DB.QUANTITE]);
         var prix=hNum(r[DB.PRIX]);
         var dk  =hDateKey(r[DB.DATE_PREST]);
@@ -3262,64 +3234,35 @@ function getHospitData(){
         if(!dk||dk.substring(0,4)!=='2026'||dk>nowDK)return;
         var mo=parseInt(dk.substring(5,7),10);
         var mFR=MONTHS_FR[mo-1]||null;
-        var d=getRaw(sn,snum,ent,org1);
+        var d=getRaw(sn);
+        d.snum=d.snum||snum; d.entite=d.entite||ent; d.org1=d.org1||org1;
         if(pat&&pat!==''&&pat!=='NULL')d.patients[pat]=true;
 
         if(fam==='SEJOUR'&&PRES_REA_SEJ.indexOf(pres)>-1){
-          d.rea_sej.push({prix:prix,qte:qte,dk:dk,mFR:mFR});
+          d.rea_sej.push({prix:prix,qte:qte>0?qte:1,dk:dk,mFR:mFR});
         } else if(fam==='SEJOUR'&&PRES_USI_SEJ.indexOf(pres)>-1){
-          d.usi_sej.push({prix:prix,qte:qte,dk:dk,mFR:mFR});
+          d.usi_sej.push({prix:prix,qte:qte>0?qte:1,dk:dk,mFR:mFR});
         } else if(PRES_REA_SURV.indexOf(pres)>-1){
           d.rea_surv.push({prix:prix,qte:qte});
         } else if(PRES_USI_SURV.indexOf(pres)>-1){
           d.usi_surv.push({prix:prix,qte:qte});
-        } else if(fam==='HONORAIRE MEDECIN'&&cobs.indexOf('SUIVI REA')>-1){
-          d.rea_med_cobs.push({prix:prix,qte:qte});
-        } else if(fam==='HONORAIRE MEDECIN'&&cobs.indexOf('SUIVI USI')>-1){
-          d.usi_med_cobs.push({prix:prix,qte:qte});
-        } else if(fam==='HONORAIRE MEDECIN'&&disc==='ANESTHESIE-REANIMATION'){
-          // Médecin ANESTHESIE-REANIMATION → à associer par quantite
-          d.anest.push({prix:prix,qte:qte});
         }
       });
     }catch(e){Logger.log('getHospitData erreur '+entite+': '+e.message);}
   }
 
-  // Passe 2 : calculer par dossier
   var dossiers=[];
 
   Object.keys(rawMap).forEach(function(sn){
     var d=rawMap[sn];
 
-    // Nuitées REA et USI
-    var nRea=0,nUsi=0;
-    d.rea_sej.forEach(function(r){nRea+=r.qte>0?r.qte:1;});
-    d.usi_sej.forEach(function(r){nUsi+=r.qte>0?r.qte:1;});
+    // Séjour REA : total + nuitées
+    var sejReaTotal=0,nRea=0,dkRea=null,mFRea=null;
+    d.rea_sej.forEach(function(r){sejReaTotal+=r.prix;nRea+=r.qte;if(!dkRea||r.dk>dkRea){dkRea=r.dk;mFRea=r.mFR;}});
 
-    // Prix séjour unitaire (dernière valeur)
-    var sejRea=d.rea_sej.length>0?d.rea_sej[0].prix:0;
-    var sejUsi=d.usi_sej.length>0?d.usi_sej[0].prix:0;
-
-    // Date
-    var dkRea=null,mFRea=null,dkUsi=null,mFUsi=null;
-    d.rea_sej.forEach(function(r){if(!dkRea||r.dk>dkRea){dkRea=r.dk;mFRea=r.mFR;}});
-    d.usi_sej.forEach(function(r){if(!dkUsi||r.dk>dkUsi){dkUsi=r.dk;mFUsi=r.mFR;}});
-
-    // Médecin REA : priorité cotation_observation, sinon anest avec qte = nRea
-    var medReaTotal=0,medReaQte=0;
-    if(d.rea_med_cobs.length>0){
-      d.rea_med_cobs.forEach(function(m){medReaTotal+=m.prix;medReaQte+=m.qte;});
-    } else if(nRea>0){
-      d.anest.forEach(function(m){if(m.qte===nRea){medReaTotal+=m.prix;medReaQte+=m.qte;}});
-    }
-
-    // Médecin USI : priorité cotation_observation, sinon anest avec qte = nUsi
-    var medUsiTotal=0,medUsiQte=0;
-    if(d.usi_med_cobs.length>0){
-      d.usi_med_cobs.forEach(function(m){medUsiTotal+=m.prix;medUsiQte+=m.qte;});
-    } else if(nUsi>0){
-      d.anest.forEach(function(m){if(m.qte===nUsi){medUsiTotal+=m.prix;medUsiQte+=m.qte;}});
-    }
+    // Séjour USI : total + nuitées
+    var sejUsiTotal=0,nUsi=0,dkUsi=null,mFUsi=null;
+    d.usi_sej.forEach(function(r){sejUsiTotal+=r.prix;nUsi+=r.qte;if(!dkUsi||r.dk>dkUsi){dkUsi=r.dk;mFUsi=r.mFR;}});
 
     // Surveillance REA
     var survReaTotal=0,survReaQte=0;
@@ -3331,33 +3274,29 @@ function getHospitData(){
 
     var nbPat=Object.keys(d.patients).length;
 
-    // Créer entrée REA
+    // REA : total = (séjour + surveillance) / nuitées
     if(nRea>0){
-      var medUnitRea=medReaQte>0?medReaTotal/medReaQte:0;
-      var sRefRea=survReaQte>0?survReaQte:nRea;
-      var survUnitRea=sRefRea>0?survReaTotal/sRefRea:0;
-      var totalRea=sejRea+medUnitRea+survUnitRea;
-      if(hIsOCP(d.org1)) totalRea=hArrondiOCP('REA',totalRea);
+      var sejUnitRea=sejReaTotal/nRea;
+      var survUnitRea=survReaQte>0?survReaTotal/survReaQte:0;
+      var totalRea=(sejReaTotal+survReaTotal)/nRea;
       dossiers.push({
         sejourNum:d.snum,sejourNom:sn,service:'REA',entite:d.entite,org1:d.org1,
         dateKey:dkRea,moisFR:mFRea,annee:2026,
-        nuitees:nRea,sejour:sejRea,medecin:medUnitRea,surv:survUnitRea,
+        nuitees:nRea,sejour:sejUnitRea,surv:survUnitRea,
         totalUnitaire:totalRea,categorie:hCateg('REA',totalRea),
         nbPatients:nbPat
       });
     }
 
-    // Créer entrée USI
+    // USI : total = (séjour + surveillance) / nuitées
     if(nUsi>0){
-      var medUnitUsi=medUsiQte>0?medUsiTotal/medUsiQte:0;
-      var sRefUsi=survUsiQte>0?survUsiQte:nUsi;
-      var survUnitUsi=sRefUsi>0?survUsiTotal/sRefUsi:0;
-      var totalUsi=sejUsi+medUnitUsi+survUnitUsi;
-      if(hIsOCP(d.org1)) totalUsi=hArrondiOCP('USI',totalUsi);
+      var sejUnitUsi=sejUsiTotal/nUsi;
+      var survUnitUsi=survUsiQte>0?survUsiTotal/survUsiQte:0;
+      var totalUsi=(sejUsiTotal+survUsiTotal)/nUsi;
       dossiers.push({
         sejourNum:d.snum,sejourNom:sn,service:'USI',entite:d.entite,org1:d.org1,
         dateKey:dkUsi,moisFR:mFUsi,annee:2026,
-        nuitees:nUsi,sejour:sejUsi,medecin:medUnitUsi,surv:survUnitUsi,
+        nuitees:nUsi,sejour:sejUnitUsi,surv:survUnitUsi,
         totalUnitaire:totalUsi,categorie:hCateg('USI',totalUsi),
         nbPatients:nbPat
       });
