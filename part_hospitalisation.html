@@ -4,16 +4,14 @@
   <div style="background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 100%);border-radius:16px;padding:20px 26px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;box-shadow:0 10px 28px rgba(99,102,241,.22);position:relative;overflow:hidden;margin-bottom:18px;">
     <div style="position:absolute;right:-40px;top:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.07);"></div>
     <div style="display:flex;align-items:center;gap:16px;position:relative;z-index:1;">
-      <div style="width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;">
-        <i class="fas fa-hospital"></i>
-      </div>
+      <div style="width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;"><i class="fas fa-hospital"></i></div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <div style="color:#fff;font-size:16px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;">SUIVI HOSPITALISATION — REA &amp; SOINS INTENSIFS · 2026</div>
         <div id="hospLastUpdate" style="color:rgba(255,255,255,.78);font-size:12px;font-weight:700;">Date d'actualisation : --/--/----</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1;flex-wrap:wrap;">
-      <input type="file" id="fileHospitalisation" accept=".xlsx,.csv" style="display:none;" onchange="handleHospitFiles(this.files)">
+      <input type="file" id="fileHospitalisation" accept=".xlsx" style="display:none;" onchange="handleHospitFiles(this.files)">
       <button onclick="document.getElementById('fileHospitalisation').click()" style="display:inline-flex;align-items:center;gap:6px;background:#fff;color:#6366F1;border-radius:20px;padding:8px 20px;font-size:0.85em;font-weight:bold;cursor:pointer;border:none;box-shadow:0 3px 6px rgba(0,0,0,0.1);">
         <i class="fas fa-file-import"></i> Importer données
       </button>
@@ -24,6 +22,18 @@
   <!-- FILTRES -->
   <div class="modern-filter-box" style="background:#fff;padding:16px 20px;margin-bottom:20px;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.10);border:1px solid #d7deea;border-top:4px solid #6366f1;">
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="sec-filter-group">
+        <label>Entité</label>
+        <select id="hospFilterEntite" onchange="applyHospitFilters()">
+          <option value="">TOUT</option>
+          <option value="CIK">CIK</option>
+          <option value="HIIN">HIIN</option>
+          <option value="CSS">CSS</option>
+          <option value="CIOB">CIOB</option>
+          <option value="CIMO">CIMO</option>
+          <option value="HPB">HPB</option>
+        </select>
+      </div>
       <div class="sec-filter-group">
         <label>Service</label>
         <select id="hospFilterService" onchange="applyHospitFilters()">
@@ -49,8 +59,16 @@
         </select>
       </div>
       <div class="sec-filter-group">
-        <label>Recherche</label>
-        <input type="text" id="hospSearchInput" placeholder="Dossier / Patient…" oninput="renderHospitTable()" style="padding:8px 12px;border:1px solid #e8ecf4;border-radius:8px;background:#f8f9fa;font-family:inherit;font-size:0.85em;font-weight:600;color:#1a1d2e;outline:none;width:170px;">
+        <label>Organisme</label>
+        <select id="hospFilterOrg" onchange="applyHospitFilters()">
+          <option value="">TOUT</option>
+          <option value="OCP">OCP</option>
+          <option value="AUTRE">Hors OCP</option>
+        </select>
+      </div>
+      <div class="sec-filter-group">
+        <label>Recherche dossier</label>
+        <input type="text" id="hospSearchInput" placeholder="N° dossier…" oninput="renderHospitTable()" style="padding:8px 12px;border:1px solid #e8ecf4;border-radius:8px;background:#f8f9fa;font-family:inherit;font-size:0.85em;font-weight:600;color:#1a1d2e;outline:none;width:150px;">
       </div>
     </div>
   </div>
@@ -120,19 +138,18 @@
       </button>
     </div>
     <div style="flex:1;overflow-y:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:0.82em;min-width:950px;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.82em;min-width:850px;">
         <thead style="position:sticky;top:0;background:#f9f9f9;z-index:5;box-shadow:0 2px 2px rgba(0,0,0,0.05);">
           <tr>
             <th style="padding:10px 12px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Dossier</th>
-            <th style="padding:10px 12px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Patient</th>
             <th style="padding:10px 12px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Service</th>
             <th style="padding:10px 12px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Mois</th>
             <th style="padding:10px 12px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Nuitées</th>
             <th style="padding:10px 12px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Séjour unit.</th>
-            <th style="padding:10px 12px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Médecin unit.</th>
             <th style="padding:10px 12px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Surv. unit.</th>
             <th style="padding:10px 12px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Total unit.</th>
             <th style="padding:10px 12px;text-align:center;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Catégorie</th>
+            <th style="padding:10px 12px;text-align:center;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">HIS</th>
           </tr>
         </thead>
         <tbody id="hospTableBody"></tbody>
@@ -141,7 +158,6 @@
   </div>
 
 </div>
-
 <style>
 .card-bg-icon{position:absolute;right:-15px;bottom:-20px;font-size:6em;opacity:.08;transform:rotate(-15deg);pointer-events:none;}
 </style>

@@ -3019,266 +3019,361 @@ function getAchatData(){
 
 function clearAchatCache(){CacheService.getScriptCache().remove(ACHAT_CACHE_KEY);return 'Cache vidé.';}
 // =======================================================================
-// MODULE HOSPITALISATION — BACKEND FINAL
-// Logique validée sur fichier réel CIK
+// MODULE HOSPITALISATION — BACKEND V11
+// Médecin : discipline=ANESTHESIE-REANIMATION + quantite = nuitées service
+// Filtre entité ajouté côté front
 // =======================================================================
 
-var HOSPIT_KEEP_COLS = [
-  'sejour_nom','lettre_sous_dossier','patient','org1','org2',
-  'type_sejour','sous_type_sejour','diagnostic','medecin_traitant',
-  'famille_acte','prestation','discipline','quantite','prix_unit',
-  'prix_ttc','prix_ttc_avec_remise','salle_radiologie','cotation_observation',
-  'date_prestation','operation','chirs_specialite'
-];
-
-// Positions dans le tableau stocké (0-based)
-var HC = {
-  SEJOUR_NOM:0, PATIENT:2, FAMILLE_ACTE:9, PRESTATION:10,
-  QUANTITE:12, PRIX_TTC_AVEC_REMISE:15, COTATION_OBS:17, DATE_PRESTATION:18
+var HOSPIT_SOURCE_SHEETS = {
+  'CIK' : '18iz-XGhIYziNBYCNBdYilIjppqkQ9SP1P5utsoVaBz8',
+  'HIIN': '', 'CSS':'', 'CIOB':'', 'CIMO':'', 'HPB':''
 };
 
-// ── Prestations SEJOUR ──
-var PRES_REA_SEJ = ['SEJOUR EN REANIMATION'];
-var PRES_USI_SEJ = [
-  'SEJOUR SOINS INTENSIFS','MINI SUITE SOINS INTENSIFS',
-  'SUITE SOINS INTENSIFS','SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE'
+// Positions dans fichier source (0-based, confirmées)
+var SRC = {
+  SEJOUR_NUM:0, SEJOUR_NOM:1, PATIENT:3, ORG1:4,
+  FAMILLE_ACTE:24, PRESTATION:26, DISCIPLINE:27,
+  QUANTITE:30, PRIX:36, COTATION_OBS:41, DATE_PREST:45
+};
+
+// Colonnes stockées en base
+var DB_COLS = [
+  'sejour_num','sejour_nom','patient','org1','famille_acte',
+  'prestation','discipline','quantite','prix_ttc_avec_remise',
+  'cotation_observation','date_prestation','entite'
 ];
 
-// ── Surveillance : dans HONORAIRE MEDECIN (prestation) OU PRESTATIONS ──
+var DB = {
+  SEJOUR_NUM:0, SEJOUR_NOM:1, PATIENT:2, ORG1:3, FAMILLE_ACTE:4,
+  PRESTATION:5, DISCIPLINE:6, QUANTITE:7, PRIX:8,
+  COTATION_OBS:9, DATE_PREST:10, ENTITE:11
+};
+
+var PRES_REA_SEJ  = ['SEJOUR EN REANIMATION'];
+var PRES_USI_SEJ  = [
+  'SEJOUR SOINS INTENSIFS','SEJOUR SOINS INTENSIFS CARDIO',
+  'SEJOUR SOINS INTENSIFS CHAMBRE DOUBLE','SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE',
+  'SUITE SOINS INTENSIFS','MINI SUITE SOINS INTENSIFS'
+];
 var PRES_REA_SURV = ['SURVEILLANCE REA','COMPLEMENT REANIMATION'];
 var PRES_USI_SURV = ['SURVEILLANCE USI','COMPLEMENT SOINS INTENSIFS'];
-
-var HOSPIT_MONTHS_FR = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
+var MONTHS_FR = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
 
 // -----------------------------------------------------------------------
 // HELPERS
 // -----------------------------------------------------------------------
-function hospNum_(v) {
-  if (!v && v !== 0) return 0;
-  if (typeof v === 'number') return isNaN(v) ? 0 : v;
-  var n = parseFloat(String(v).replace(/\s/g,'').replace(',','.'));
-  return isNaN(n) ? 0 : n;
+function hNum(v){
+  if(!v&&v!==0)return 0;
+  if(typeof v==='number')return isNaN(v)?0:v;
+  var n=parseFloat(String(v).replace(/\s/g,'').replace(',','.'));
+  return isNaN(n)?0:n;
 }
-
-function hospParseDateKey_(v) {
-  if (!v) return null;
-  if (v instanceof Date && !isNaN(v)) {
-    return v.getFullYear() + '-' + String(v.getMonth()+1).padStart(2,'0');
-  }
-  var s = String(v).trim();
-  var m1 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m1) return m1[1] + '-' + m1[2];
-  var m2 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (m2) return m2[3] + '-' + m2[2];
-  // Format US court : 5/15/26
-  var m3 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-  if (m3) {
-    var yr = parseInt(m3[3]); if (yr < 100) yr += 2000;
-    return yr + '-' + String(m3[1]).padStart(2,'0');
-  }
+function hDateKey(v){
+  if(!v)return null;
+  if(v instanceof Date){if(isNaN(v.getTime()))return null;return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0');}
+  var s=String(v).trim();
+  var m1=s.match(/^(\d{4})-(\d{2})/);if(m1)return m1[1]+'-'+m1[2];
+  var m2=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);if(m2)return m2[3]+'-'+m2[2];
+  var m3=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if(m3){var yr=parseInt(m3[3]);if(yr<100)yr+=2000;return yr+'-'+String(m3[1]).padStart(2,'0');}
   return null;
 }
-
-function hospNorm_(v) {
-  return String(v || '').toUpperCase().trim()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+function hNorm(v){return String(v||'').toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+function hGet(row,i){
+  if(i<0||i>=row.length)return'';
+  var v=row[i];if(v===null||v===undefined)return'';
+  if(v instanceof Date)return hDateKey(v)||'';
+  return String(v).trim();
+}
+function hIsOCP(org1){
+  var o=String(org1||'').toUpperCase();
+  return o.indexOf('OCP')>-1;
 }
 
-function hospCategorie_(service, total) {
-  if (service === 'REA') {
-    if (total > 3000)   return 'A';
-    if (total === 3000) return 'B';
-    if (total > 1500)   return 'C';
-    return 'D';
+function hArrondiOCP(svc,total){
+  if(svc==='REA'){
+    if(total>=1400&&total<1500) return 1500;
+    if(total>=2900&&total<3000) return 3000;
   } else {
-    if (total > 2000)   return 'A';
-    if (total === 2000) return 'B';
-    if (total > 1000)   return 'C';
-    return 'D';
+    if(total>=900&&total<1000)  return 1000;
+    if(total>=1900&&total<2000) return 2000;
   }
+  return total;
+}
+
+function hCateg(svc,total){
+  if(svc==='REA'){if(total>3000)return'A';if(total===3000)return'B';if(total>1500)return'C';return'D';}
+  if(total>2000)return'A';if(total===2000)return'B';if(total>1000)return'C';return'D';
 }
 
 // -----------------------------------------------------------------------
-// INDEX SHEET
+// INDEX + DB
 // -----------------------------------------------------------------------
-function getHospitIndexSheet_() {
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('DB_INDEX_HOSPIT');
-  if (!sheet) {
-    sheet = ss.insertSheet('DB_INDEX_HOSPIT');
-    sheet.appendRow(['ENTITE','SPREADSHEET_ID','SHEET_NAME','LAST_UPDATE','NB_LIGNES']);
-    sheet.getRange(1,1,1,5).setFontWeight('bold');
-  }
-  return sheet;
+function getHospIdx(){
+  var ss=SpreadsheetApp.getActiveSpreadsheet();
+  var sh=ss.getSheetByName('DB_INDEX_HOSPIT');
+  if(!sh){sh=ss.insertSheet('DB_INDEX_HOSPIT');sh.appendRow(['ENTITE','SPREADSHEET_ID','SHEET_NAME','LAST_UPDATE','NB_LIGNES']);sh.getRange(1,1,1,5).setFontWeight('bold');}
+  return sh;
 }
-
-function getOrCreateHospitDB_(entity) {
-  var idx  = getHospitIndexSheet_();
-  var data = idx.getDataRange().getValues();
-  var shn  = 'BDD_HOSPIT';
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim().toUpperCase() === entity.toUpperCase()) {
-      try {
-        var ss    = SpreadsheetApp.openById(String(data[i][1]).trim());
-        var sheet = ss.getSheetByName(shn) || ss.insertSheet(shn);
-        return { sheet:sheet, rowIndex:i+1, idxSheet:idx };
-      } catch(e) {}
+function getHospDB(entity){
+  var idx=getHospIdx(),data=idx.getDataRange().getValues(),shn='BDD_HOSPIT';
+  for(var i=1;i<data.length;i++){
+    if(String(data[i][0]).trim().toUpperCase()===entity.toUpperCase()){
+      try{
+        var ss=SpreadsheetApp.openById(String(data[i][1]).trim());
+        var sh=ss.getSheetByName(shn)||ss.insertSheet(shn);
+        if(sh.getLastRow()===0){sh.appendRow(DB_COLS);sh.getRange(1,1,1,DB_COLS.length).setFontWeight('bold');}
+        return{sheet:sh,rowIndex:i+1,idx:idx};
+      }catch(e){}
     }
   }
-  var newSS    = SpreadsheetApp.create('DB_HOSPIT_' + entity.toUpperCase());
-  var newSheet = newSS.getSheets()[0];
-  newSheet.setName(shn);
-  newSheet.appendRow(HOSPIT_KEEP_COLS);
-  newSheet.getRange(1,1,1,HOSPIT_KEEP_COLS.length).setFontWeight('bold');
-  idx.appendRow([entity, newSS.getId(), shn, new Date(), 0]);
-  return { sheet:newSheet, rowIndex:idx.getLastRow(), idxSheet:idx };
+  var newSS=SpreadsheetApp.create('DB_HOSPIT_'+entity.toUpperCase());
+  var newSh=newSS.getSheets()[0];newSh.setName(shn);
+  newSh.appendRow(DB_COLS);newSh.getRange(1,1,1,DB_COLS.length).setFontWeight('bold');
+  idx.appendRow([entity,newSS.getId(),shn,new Date(),0]);
+  return{sheet:newSh,rowIndex:idx.getLastRow(),idx:idx};
 }
 
 // -----------------------------------------------------------------------
-// SAUVEGARDE CHUNK — cumul mensuel
+// IMPORT DEPUIS GOOGLE SHEET SOURCE
 // -----------------------------------------------------------------------
-function saveHospitChunk(chunkData, entity, moisKey) {
-  if (!chunkData || chunkData.length === 0) return 'empty';
-  var ctx   = getOrCreateHospitDB_(entity);
-  var sheet = ctx.sheet;
+function importHospitFromSheet(entity){
+  var sheetId=HOSPIT_SOURCE_SHEETS[entity];
+  if(!sheetId)return{error:'Pas de Sheet configuré pour '+entity};
+  try{
+    var ss=SpreadsheetApp.openById(sheetId);
+    var src=ss.getSheets()[0],lr=src.getLastRow();
+    if(lr<2)return{error:'Sheet source vide'};
+    var now=new Date(),nowDK=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    var lc=src.getLastColumn(),clean=[],BATCH=5000;
 
-  // Premier chunk : supprimer les lignes du mois importé
-  if (moisKey && sheet.getLastRow() > 1) {
-    var existing = sheet.getRange(2,1,sheet.getLastRow()-1,HOSPIT_KEEP_COLS.length).getValues();
-    var toKeep   = existing.filter(function(r) {
-      var dk = hospParseDateKey_(r[HC.DATE_PRESTATION]);
-      return dk !== moisKey;
-    });
-    sheet.getRange(2,1,sheet.getLastRow()-1,HOSPIT_KEEP_COLS.length).clearContent();
-    if (toKeep.length > 0) {
-      sheet.getRange(2,1,toKeep.length,HOSPIT_KEEP_COLS.length).setValues(toKeep);
+    // Passe 1 : collecter les sejour_nom qui ont un vrai séjour REA/USI 2026
+    var validSejours={};
+    for(var start=2;start<=lr;start+=BATCH){
+      var rows=src.getRange(start,1,Math.min(start+BATCH-1,lr)-start+1,lc).getValues();
+      rows.forEach(function(row){
+        if(row.length<46)return;
+        var dk=hDateKey(row[SRC.DATE_PREST]);
+        if(!dk||dk.substring(0,4)!=='2026'||dk>nowDK)return;
+        var fam=hNorm(row[SRC.FAMILLE_ACTE]);
+        var pres=hNorm(row[SRC.PRESTATION]);
+        if(fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1)){
+          validSejours[hGet(row,SRC.SEJOUR_NOM)]=true;
+        }
+      });
     }
-  }
 
-  var insertRow = sheet.getLastRow() + 1;
-  sheet.getRange(insertRow,1,chunkData.length,chunkData[0].length).setValues(chunkData);
+    // Passe 2 : collecter toutes les lignes utiles des dossiers valides
+    for(var start=2;start<=lr;start+=BATCH){
+      var rows=src.getRange(start,1,Math.min(start+BATCH-1,lr)-start+1,lc).getValues();
+      rows.forEach(function(row){
+        if(row.length<46)return;
+        var snom=hGet(row,SRC.SEJOUR_NOM);
+        if(!validSejours[snom])return; // Ignorer dossiers sans séjour REA/USI
+        var dk=hDateKey(row[SRC.DATE_PREST]);
+        if(!dk||dk.substring(0,4)!=='2026'||dk>nowDK)return;
+        var fam=hNorm(row[SRC.FAMILLE_ACTE]);
+        var pres=hNorm(row[SRC.PRESTATION]);
+        var disc=hNorm(row[SRC.DISCIPLINE]);
+        var cobs=hNorm(row[SRC.COTATION_OBS]);
+        var ok=(fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1))
+             ||PRES_REA_SURV.indexOf(pres)>-1||PRES_USI_SURV.indexOf(pres)>-1
+             ||(fam==='HONORAIRE MEDECIN'&&(cobs.indexOf('SUIVI REA')>-1||cobs.indexOf('SUIVI USI')>-1))
+             ||(fam==='HONORAIRE MEDECIN'&&disc==='ANESTHESIE-REANIMATION');
+        if(!ok)return;
+        clean.push([hGet(row,SRC.SEJOUR_NUM),snom,hGet(row,SRC.PATIENT),
+          hGet(row,SRC.ORG1),fam,pres,disc,hGet(row,SRC.QUANTITE),
+          hGet(row,SRC.PRIX),cobs,dk,entity]);
+      });
+    }
+    if(clean.length===0)return{error:'Aucune ligne REA/USI 2026 trouvée'};
+    var ctx=getHospDB(entity),sh=ctx.sheet;
+    if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,DB_COLS.length).clearContent();
+    var CHUNK=2000;
+    for(var c=0;c<clean.length;c+=CHUNK){var chunk=clean.slice(c,c+CHUNK);sh.getRange(sh.getLastRow()+1,1,chunk.length,chunk[0].length).setValues(chunk);}
+    var ts=new Date();
+    ctx.idx.getRange(ctx.rowIndex,4).setValue(ts);ctx.idx.getRange(ctx.rowIndex,5).setValue(sh.getLastRow()-1);
+    PropertiesService.getScriptProperties().setProperty('LAST_HOSPIT_UPDATE_'+entity,ts.toLocaleString('fr-FR'));
+    return{success:true,nbLignes:clean.length};
+  }catch(e){Logger.log('importHospitFromSheet: '+e.message);return{error:e.message};}
+}
 
-  var now = new Date();
-  ctx.idxSheet.getRange(ctx.rowIndex,4).setValue(now);
-  ctx.idxSheet.getRange(ctx.rowIndex,5).setValue(sheet.getLastRow()-1);
-  PropertiesService.getScriptProperties().setProperty('LAST_HOSPIT_UPDATE_'+entity, now.toLocaleString('fr-FR'));
-  return 'ok';
+// -----------------------------------------------------------------------
+// SAUVEGARDE CHUNK (import fichier navigateur)
+// -----------------------------------------------------------------------
+function saveHospitChunk(chunkData,entity){
+  if(!chunkData||chunkData.length===0)return'empty';
+  var ctx=getHospDB(entity),sh=ctx.sheet;
+  sh.getRange(sh.getLastRow()+1,1,chunkData.length,chunkData[0].length).setValues(chunkData);
+  var ts=new Date();
+  ctx.idx.getRange(ctx.rowIndex,4).setValue(ts);ctx.idx.getRange(ctx.rowIndex,5).setValue(sh.getLastRow()-1);
+  PropertiesService.getScriptProperties().setProperty('LAST_HOSPIT_UPDATE_'+entity,ts.toLocaleString('fr-FR'));
+  return'ok';
+}
+function clearHospitData(entity){
+  var ctx=getHospDB(entity),sh=ctx.sheet;
+  if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,DB_COLS.length).clearContent();
+  return'cleared';
 }
 
 // -----------------------------------------------------------------------
 // LECTURE + CALCUL
 // -----------------------------------------------------------------------
-function getHospitData() {
-  var user     = getUserContext();
-  var idxSheet = getHospitIndexSheet_();
-  var idxData  = idxSheet.getDataRange().getValues();
-  var now      = new Date();
-  var nowDK    = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  var allRows  = [];
+function getHospitData(){
+  var user=getUserContext(),idx=getHospIdx(),idxData=idx.getDataRange().getValues();
+  var now=new Date(),nowDK=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
 
-  for (var i = 1; i < idxData.length; i++) {
-    var entite = String(idxData[i][0]).trim();
-    var fileId = String(idxData[i][1]).trim();
-    var shName = String(idxData[i][2]).trim() || 'BDD_HOSPIT';
-    if (!entityMatchesUser_(entite, user.entity)) continue;
-    if (!fileId) continue;
+  // Passe 1 : collecter toutes les lignes par dossier
+  var rawMap={};
 
-    try {
-      var extSS    = SpreadsheetApp.openById(fileId);
-      var extSheet = extSS.getSheetByName(shName);
-      if (!extSheet || extSheet.getLastRow() < 2) continue;
-      var lr   = extSheet.getLastRow();
-      var data = extSheet.getRange(2,1,lr-1,HOSPIT_KEEP_COLS.length).getValues();
+  function getRaw(sn,snum){
+    if(!rawMap[sn])rawMap[sn]={snum:snum,patients:{},
+      rea_sej:[],usi_sej:[],rea_surv:[],usi_surv:[],
+      rea_med_cobs:[],usi_med_cobs:[],anest:[]};
+    return rawMap[sn];
+  }
 
-      data.forEach(function(r) {
-        var fam  = hospNorm_(r[HC.FAMILLE_ACTE]);
-        var pres = hospNorm_(r[HC.PRESTATION]);
-        var cobs = hospNorm_(r[HC.COTATION_OBS]);
+  for(var i=1;i<idxData.length;i++){
+    var entite=String(idxData[i][0]).trim();
+    var fileId=String(idxData[i][1]).trim();
+    var shName=String(idxData[i][2]).trim()||'BDD_HOSPIT';
+    if(!entityMatchesUser_(entite,user.entity))continue;
+    var entiteCode=entite; // Pour retourner l'entité dans chaque dossier
+    if(!fileId)continue;
+    try{
+      var extSS=SpreadsheetApp.openById(fileId);
+      var extSh=extSS.getSheetByName(shName);
+      if(!extSh||extSh.getLastRow()<2)continue;
+      var lr=extSh.getLastRow();
+      var data=extSh.getRange(2,1,lr-1,DB_COLS.length).getValues();
+      data.forEach(function(r){
+        var sn  =String(r[DB.SEJOUR_NOM]||'').trim();if(!sn)return;
+        var snum=String(r[DB.SEJOUR_NUM]||'').trim();
+        var pat =String(r[DB.PATIENT]||'').trim();
+        var fam =hNorm(r[DB.FAMILLE_ACTE]);
+        var pres=hNorm(r[DB.PRESTATION]);
+        var disc=hNorm(r[DB.DISCIPLINE]);
+        var cobs=hNorm(r[DB.COTATION_OBS]);
+        var qte =hNum(r[DB.QUANTITE]);
+        var prix=hNum(r[DB.PRIX]);
+        var dk  =hDateKey(r[DB.DATE_PREST]);
+        var ent =String(r[DB.ENTITE]||entite).trim();
+        var org1=String(r[DB.ORG1]||'').trim();
+        if(!dk||dk.substring(0,4)!=='2026'||dk>nowDK)return;
+        var mo=parseInt(dk.substring(5,7),10);
+        var mFR=MONTHS_FR[mo-1]||null;
+        var d=getRaw(sn,snum,ent,org1);
+        if(pat&&pat!==''&&pat!=='NULL')d.patients[pat]=true;
 
-        var isReaSej  = fam==='SEJOUR' && PRES_REA_SEJ.indexOf(pres)>-1;
-        var isUsiSej  = fam==='SEJOUR' && PRES_USI_SEJ.indexOf(pres)>-1;
-        var isReaSurv = PRES_REA_SURV.indexOf(pres)>-1;
-        var isUsiSurv = PRES_USI_SURV.indexOf(pres)>-1;
-        var isReaMed  = fam==='HONORAIRE MEDECIN' && cobs.indexOf('SUIVI REA')>-1;
-        var isUsiMed  = fam==='HONORAIRE MEDECIN' && cobs.indexOf('SUIVI USI')>-1;
-        if (!isReaSej&&!isUsiSej&&!isReaSurv&&!isUsiSurv&&!isReaMed&&!isUsiMed) return;
-
-        var dk = hospParseDateKey_(r[HC.DATE_PRESTATION]);
-        if (!dk || dk.substring(0,4)!=='2026' || dk>nowDK) return;
-
-        var mo = parseInt(dk.substring(5,7),10);
-        allRows.push({
-          entite:entite,
-          sejourNom:String(r[HC.SEJOUR_NOM]||'').trim(),
-          patient:String(r[HC.PATIENT]||'').trim(),
-          quantite:hospNum_(r[HC.QUANTITE]),
-          prix:hospNum_(r[HC.PRIX_TTC_AVEC_REMISE]),
-          dateKey:dk, annee:2026,
-          moisFR:HOSPIT_MONTHS_FR[mo-1]||null,
-          isReaSej:isReaSej, isUsiSej:isUsiSej,
-          isReaSurv:isReaSurv, isUsiSurv:isUsiSurv,
-          isReaMed:isReaMed, isUsiMed:isUsiMed
-        });
+        if(fam==='SEJOUR'&&PRES_REA_SEJ.indexOf(pres)>-1){
+          d.rea_sej.push({prix:prix,qte:qte,dk:dk,mFR:mFR});
+        } else if(fam==='SEJOUR'&&PRES_USI_SEJ.indexOf(pres)>-1){
+          d.usi_sej.push({prix:prix,qte:qte,dk:dk,mFR:mFR});
+        } else if(PRES_REA_SURV.indexOf(pres)>-1){
+          d.rea_surv.push({prix:prix,qte:qte});
+        } else if(PRES_USI_SURV.indexOf(pres)>-1){
+          d.usi_surv.push({prix:prix,qte:qte});
+        } else if(fam==='HONORAIRE MEDECIN'&&cobs.indexOf('SUIVI REA')>-1){
+          d.rea_med_cobs.push({prix:prix,qte:qte});
+        } else if(fam==='HONORAIRE MEDECIN'&&cobs.indexOf('SUIVI USI')>-1){
+          d.usi_med_cobs.push({prix:prix,qte:qte});
+        } else if(fam==='HONORAIRE MEDECIN'&&disc==='ANESTHESIE-REANIMATION'){
+          // Médecin ANESTHESIE-REANIMATION → à associer par quantite
+          d.anest.push({prix:prix,qte:qte});
+        }
       });
-    } catch(e) { Logger.log('Hospit erreur '+entite+': '+e.message); }
+    }catch(e){Logger.log('getHospitData erreur '+entite+': '+e.message);}
   }
 
-  if (allRows.length === 0) {
-    return { dossiers:[], filters:{annees:[2026],mois:[]}, lastUpdate:'--/--/----' };
-  }
+  // Passe 2 : calculer par dossier
+  var dossiers=[];
 
-  // ── AGRÉGATION ──
-  var dossiersMap = {};
-  function getOrCreate(sn, svc, r) {
-    var key = sn+'|'+svc;
-    if (!dossiersMap[key]) {
-      dossiersMap[key] = {
-        sejourNom:sn, patient:r.patient, entite:r.entite, service:svc,
-        dateKey:null, annee:2026, moisFR:null,
-        sejour:0, medTotal:0, medQte:0, survTotal:0, survQte:0,
-        nuitees:0, medecin:0, surv:0, totalUnitaire:0, categorie:null
-      };
+  Object.keys(rawMap).forEach(function(sn){
+    var d=rawMap[sn];
+
+    // Nuitées REA et USI
+    var nRea=0,nUsi=0;
+    d.rea_sej.forEach(function(r){nRea+=r.qte>0?r.qte:1;});
+    d.usi_sej.forEach(function(r){nUsi+=r.qte>0?r.qte:1;});
+
+    // Prix séjour unitaire (dernière valeur)
+    var sejRea=d.rea_sej.length>0?d.rea_sej[0].prix:0;
+    var sejUsi=d.usi_sej.length>0?d.usi_sej[0].prix:0;
+
+    // Date
+    var dkRea=null,mFRea=null,dkUsi=null,mFUsi=null;
+    d.rea_sej.forEach(function(r){if(!dkRea||r.dk>dkRea){dkRea=r.dk;mFRea=r.mFR;}});
+    d.usi_sej.forEach(function(r){if(!dkUsi||r.dk>dkUsi){dkUsi=r.dk;mFUsi=r.mFR;}});
+
+    // Médecin REA : priorité cotation_observation, sinon anest avec qte = nRea
+    var medReaTotal=0,medReaQte=0;
+    if(d.rea_med_cobs.length>0){
+      d.rea_med_cobs.forEach(function(m){medReaTotal+=m.prix;medReaQte+=m.qte;});
+    } else if(nRea>0){
+      d.anest.forEach(function(m){if(m.qte===nRea){medReaTotal+=m.prix;medReaQte+=m.qte;}});
     }
-    var d = dossiersMap[key];
-    if (!d.patient && r.patient) d.patient = r.patient;
-    if (r.dateKey && (!d.dateKey || r.dateKey > d.dateKey)) {
-      d.dateKey=r.dateKey; d.moisFR=r.moisFR;
-    }
-    return d;
-  }
 
-  allRows.forEach(function(r) {
-    var sn=r.sejourNom; if(!sn) return; var d;
-    if      (r.isReaSej)  { d=getOrCreate(sn,'REA',r); d.sejour=r.prix; d.nuitees+=1; }
-    else if (r.isUsiSej)  { d=getOrCreate(sn,'USI',r); d.sejour=r.prix; d.nuitees+=1; }
-    else if (r.isReaSurv) { d=getOrCreate(sn,'REA',r); d.survTotal+=r.prix; d.survQte+=r.quantite; }
-    else if (r.isUsiSurv) { d=getOrCreate(sn,'USI',r); d.survTotal+=r.prix; d.survQte+=r.quantite; }
-    else if (r.isReaMed)  { d=getOrCreate(sn,'REA',r); d.medTotal+=r.prix; d.medQte+=r.quantite; }
-    else if (r.isUsiMed)  { d=getOrCreate(sn,'USI',r); d.medTotal+=r.prix; d.medQte+=r.quantite; }
+    // Médecin USI : priorité cotation_observation, sinon anest avec qte = nUsi
+    var medUsiTotal=0,medUsiQte=0;
+    if(d.usi_med_cobs.length>0){
+      d.usi_med_cobs.forEach(function(m){medUsiTotal+=m.prix;medUsiQte+=m.qte;});
+    } else if(nUsi>0){
+      d.anest.forEach(function(m){if(m.qte===nUsi){medUsiTotal+=m.prix;medUsiQte+=m.qte;}});
+    }
+
+    // Surveillance REA
+    var survReaTotal=0,survReaQte=0;
+    d.rea_surv.forEach(function(s){survReaTotal+=s.prix;survReaQte+=s.qte;});
+
+    // Surveillance USI
+    var survUsiTotal=0,survUsiQte=0;
+    d.usi_surv.forEach(function(s){survUsiTotal+=s.prix;survUsiQte+=s.qte;});
+
+    var nbPat=Object.keys(d.patients).length;
+
+    // Créer entrée REA
+    if(nRea>0){
+      var medUnitRea=medReaQte>0?medReaTotal/medReaQte:0;
+      var sRefRea=survReaQte>0?survReaQte:nRea;
+      var survUnitRea=sRefRea>0?survReaTotal/sRefRea:0;
+      var totalRea=sejRea+medUnitRea+survUnitRea;
+      if(hIsOCP(d.org1)) totalRea=hArrondiOCP('REA',totalRea);
+      dossiers.push({
+        sejourNum:d.snum,sejourNom:sn,service:'REA',entite:d.entite,org1:d.org1,
+        dateKey:dkRea,moisFR:mFRea,annee:2026,
+        nuitees:nRea,sejour:sejRea,medecin:medUnitRea,surv:survUnitRea,
+        totalUnitaire:totalRea,categorie:hCateg('REA',totalRea),
+        nbPatients:nbPat
+      });
+    }
+
+    // Créer entrée USI
+    if(nUsi>0){
+      var medUnitUsi=medUsiQte>0?medUsiTotal/medUsiQte:0;
+      var sRefUsi=survUsiQte>0?survUsiQte:nUsi;
+      var survUnitUsi=sRefUsi>0?survUsiTotal/sRefUsi:0;
+      var totalUsi=sejUsi+medUnitUsi+survUnitUsi;
+      if(hIsOCP(d.org1)) totalUsi=hArrondiOCP('USI',totalUsi);
+      dossiers.push({
+        sejourNum:d.snum,sejourNom:sn,service:'USI',entite:d.entite,org1:d.org1,
+        dateKey:dkUsi,moisFR:mFUsi,annee:2026,
+        nuitees:nUsi,sejour:sejUsi,medecin:medUnitUsi,surv:survUnitUsi,
+        totalUnitaire:totalUsi,categorie:hCateg('USI',totalUsi),
+        nbPatients:nbPat
+      });
+    }
   });
 
-  var dossiers = [];
-  Object.keys(dossiersMap).forEach(function(key) {
-    var d = dossiersMap[key];
-    if (d.nuitees === 0) return;
-    d.medecin = d.medQte  > 0 ? d.medTotal  / d.medQte  : 0;
-    var sRef  = d.survQte > 0 ? d.survQte   : d.nuitees;
-    d.surv    = sRef      > 0 ? d.survTotal / sRef       : 0;
-    d.totalUnitaire = d.sejour + d.medecin + d.surv;
-    d.categorie     = hospCategorie_(d.service, d.totalUnitaire);
-    dossiers.push(d);
-  });
+  var moisSet={};
+  dossiers.forEach(function(d){if(d.moisFR)moisSet[d.moisFR]=true;});
+  var moisDispos=MONTHS_FR.filter(function(m){return moisSet[m];});
 
-  var moisSet = {};
-  dossiers.forEach(function(d){ if(d.moisFR) moisSet[d.moisFR]=true; });
-  var moisDispos = HOSPIT_MONTHS_FR.filter(function(m){ return moisSet[m]; });
-
-  var lastUpdate = '--/--/----';
-  try {
-    var p = PropertiesService.getScriptProperties()
+  var lastUpdate='--/--/----';
+  try{
+    var p=PropertiesService.getScriptProperties()
       .getProperty('LAST_HOSPIT_UPDATE_'+(user.entity!=='ALL'?user.entity:(idxData[1]?idxData[1][0]:'ALL')));
-    if (p) lastUpdate = p;
-  } catch(e) {}
+    if(p)lastUpdate=p;
+  }catch(e){}
 
-  return { dossiers:dossiers, filters:{annees:[2026],mois:moisDispos}, lastUpdate:lastUpdate };
+  return{dossiers:dossiers,filters:{annees:[2026],mois:moisDispos},lastUpdate:lastUpdate};
 }
