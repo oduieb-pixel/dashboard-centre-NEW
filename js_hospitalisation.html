@@ -150,6 +150,16 @@ function processOneHospitFile(file, display, onDone) {
         return String(v).trim();
       }
 
+      function hospParseNum(v) {
+        if (v===null||v===undefined||v==='') return '0';
+        if (typeof v==='number') return String(v);
+        var s = String(v).trim().replace(/[\s\u00A0]/g,'');
+        if (!s) return '0';
+        if (s.indexOf(',')>-1) { s = s.replace(/\./g,'').replace(',','.'); }
+        var n = parseFloat(s);
+        return isNaN(n) ? '0' : String(n);
+      }
+
       function parseDate(val) {
         if (!val||val==='') return null;
         var s = String(val).trim();
@@ -187,8 +197,8 @@ function processOneHospitFile(file, display, onDone) {
           getCell(row, idx_pat),
           idx_org1>=0?getCell(row,idx_org1):'',
           fam, pres,
-          getCell(row, idx_qte),
-          getCell(row, idx_prix),
+          hospParseNum(getCell(row, idx_qte)),
+          hospParseNum(getCell(row, idx_prix)),
           dk,
           entity
         ]);

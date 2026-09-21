@@ -3062,7 +3062,10 @@ var MONTHS_FR = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','
 function hNum(v){
   if(!v&&v!==0)return 0;
   if(typeof v==='number')return isNaN(v)?0:v;
-  var n=parseFloat(String(v).replace(/\s/g,'').replace(',','.'));
+  var s=String(v).trim().replace(/[\s\u00A0]/g,'');
+  if(!s)return 0;
+  if(s.indexOf(',')>-1){ s=s.replace(/\./g,'').replace(',','.'); }
+  var n=parseFloat(s);
   return isNaN(n)?0:n;
 }
 function hDateKey(v){
