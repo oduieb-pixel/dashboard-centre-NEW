@@ -175,16 +175,11 @@ function processOneHospitFile(file, display, onDone) {
 
         var fam  = hospNormStr(getCell(row, idx_fam));
         var pres = hospNormStr(getCell(row, idx_pres));
-        var cobs = hospNormStr(getCell(row, idx_cobs));
 
-        var disc_val = hospNormStr(getCell(row, hRow.indexOf('discipline')));
         var ok = (fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1))
-              || PRES_REA_SURV.indexOf(pres)>-1 || PRES_USI_SURV.indexOf(pres)>-1
-              || (fam==='HONORAIRE MEDECIN'&&(cobs.indexOf('SUIVI REA')>-1||cobs.indexOf('SUIVI USI')>-1))
-              || (fam==='HONORAIRE MEDECIN'&&disc_val==='ANESTHESIE-REANIMATION');
+              || PRES_REA_SURV.indexOf(pres)>-1 || PRES_USI_SURV.indexOf(pres)>-1;
         if (!ok) return;
 
-        var idx_disc = hRow.indexOf('discipline');
         var idx_org1=hRow.indexOf('org1');
         cleanData.push([
           getCell(row, idx_sn),
@@ -192,10 +187,9 @@ function processOneHospitFile(file, display, onDone) {
           getCell(row, idx_pat),
           idx_org1>=0?getCell(row,idx_org1):'',
           fam, pres,
-          idx_disc>=0?hospNormStr(getCell(row,idx_disc)):'',
           getCell(row, idx_qte),
           getCell(row, idx_prix),
-          cobs, dk,
+          dk,
           entity
         ]);
       });
@@ -342,7 +336,6 @@ function renderHospitTable(){
       '<td style="padding:9px 12px;color:#64748b;font-weight:600;">'+ml+'</td>'+
       '<td style="padding:9px 12px;text-align:right;font-weight:700;">'+(d.nuitees||0).toLocaleString('fr-FR')+'</td>'+
       '<td style="padding:9px 12px;text-align:right;">'+Math.round(d.sejour||0).toLocaleString('fr-FR')+'</td>'+
-      '<td style="padding:9px 12px;text-align:right;">'+Math.round(d.medecin||0).toLocaleString('fr-FR')+'</td>'+
       '<td style="padding:9px 12px;text-align:right;">'+Math.round(d.surv||0).toLocaleString('fr-FR')+'</td>'+
       '<td style="padding:9px 12px;text-align:right;font-weight:800;color:#1e293b;">'+Math.round(d.totalUnitaire||0).toLocaleString('fr-FR')+'</td>'+
       '<td style="padding:9px 12px;text-align:center;"><span style="'+cs+'">'+d.categorie+'</span></td>'+
@@ -357,8 +350,8 @@ function renderHospitTable(){
 // =======================================================================
 function exportHospitExcel(){
   if(!filteredHospitData.length){alert('Aucune donnée.');return;}
-  var rows=[['Dossier','Service','Mois','Nuitées','Séjour unit.','Médecin unit.','Surv. unit.','Total unit.','Catégorie']];
-  filteredHospitData.forEach(function(d){rows.push([d.sejourNom||'',d.service||'',(d.moisFR||'')+' 2026',d.nuitees||0,Math.round(d.sejour||0),Math.round(d.medecin||0),Math.round(d.surv||0),Math.round(d.totalUnitaire||0),d.categorie||'']);});
+  var rows=[['Dossier','Service','Mois','Nuitées','Séjour unit.','Surv. unit.','Total unit.','Catégorie']];
+  filteredHospitData.forEach(function(d){rows.push([d.sejourNom||'',d.service||'',(d.moisFR||'')+' 2026',d.nuitees||0,Math.round(d.sejour||0),Math.round(d.surv||0),Math.round(d.totalUnitaire||0),d.categorie||'']);});
   var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Hospitalisation');
   XLSX.writeFile(wb,'Suivi_Hospitalisation_2026.xlsx');
 }
