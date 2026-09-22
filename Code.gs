@@ -3319,3 +3319,49 @@ function getHospitData(){
 
   return{dossiers:dossiers,filters:{annees:[2026],mois:moisDispos},lastUpdate:lastUpdate};
 }
+diagHospit()
+function diagHospit() {
+  var out = [];
+  var idx = getHospIdx();
+  var idxData = idx.getDataRange().getValues();
+  out.push('=== DB_INDEX_HOSPIT (' + (idxData.length-1) + ' entité(s)) ===');
+  for (var i=1; i<idxData.length; i++) {
+    var entite = String(idxData[i][0]).trim();
+    var fileId = String(idxData[i][1]).trim();
+    var shName = String(idxData[i][2]).trim() || 'BDD_HOSPIT';
+    out.push('Ligne ' + i + ' | entite="' + entite + '" | fileId="' + fileId + '" | sheet="' + shName + '"');
+    if (!fileId) { out.push('  -> PAS DE fileId, ignorée'); continue; }
+    try {
+      var ss = SpreadsheetApp.openById(fileId);
+      var sh = ss.getSheetByName(shName);
+      if (!sh) { out.push('  -> Onglet "' + shName + '" INTROUVABLE'); continue; }
+      var lr = sh.getLastRow();
+      out.push('  -> Fichier OK, onglet OK, ' + (lr-1) + ' ligne(s) de données');
+      if (lr >= 2) {
+        var sample = sh.getRange(2,1,Math.min(5,lr-1),DB_COLS.length).getValues();
+        out.push('  -> En-têtes attendues: ' + DB_COLS.join(' | '));
+        sample.forEach(function(r,ri){ out.push('  -> Ligne ' + (ri+2) + ': ' + JSON.stringify(r)); });
+        sample.forEach(function(r){
+          var fam=hNorm(r[DB.FAMILLE_ACTE]), pres=hNorm(r[DB.PRESTATION]);
+          var dk=hDateKey(r[DB.DATE_PREST]);
+          var isSej=(fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1));
+          var isSurv=(PRES_REA_SURV.indexOf(pres)>-1||PRES_USI_SURV.indexOf(pres)>-1);
+          out.push('     fam="'+fam+'" pres="'+pres+'" dateKey="'+dk+'" isSej='+isSej+' isSurv='+isSurv);
+        });
+      }
+    } catch(e) { out.push('  -> ERREUR ouverture fichier: ' + e.message); }
+  }
+  out.push('');
+  out.push('=== getUserContext() ===');
+  try { var user = getUserContext(); out.push('entity="' + user.entity + '"'); }
+  catch(e) { out.push('ERREUR getUserContext: ' + e.message); }
+  out.push('');
+  out.push('=== getHospitData() ===');
+  try {
+    var res = getHospitData();
+    out.push('Nombre de dossiers retournés: ' + res.dossiers.length);
+    if (res.dossiers.length > 0) out.push('Exemple: ' + JSON.stringify(res.dossiers[0]));
+  } catch(e) { out.push('ERREUR getHospitData: ' + e.message); }
+  Logger.log(out.join('\n'));
+  return out.join('\n');
+}

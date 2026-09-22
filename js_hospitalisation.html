@@ -1,23 +1,24 @@
 <script>
 /**
- * MODULE HOSPITALISATION — v15 FINALE
- * Chargement auto au lancement du volet
- * Bouton import = choisir fichier xlsx → intégrer nouvelles données
- * Positions colonnes fixes confirmées sur fichier réel
+ * MODULE HOSPITALISATION · v18 ANALYSE FINANCIÈRE
+ * Service binaire REA/USI, organismes payants regroupés, tendance filtrée par service, réinitialisation
  */
 
 var globalHospitData   = [];
 var filteredHospitData = [];
 var hospChartDonutInst = null;
 var hospChartBarInst   = null;
-var hospBarService     = 'ALL';
+var hospChartTrendInst = null;
+var hospServiceFilter  = 'REA';
+var hospPeriodMode     = 'mois';
 var HOSPIT_MOIS_ORDER  = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
+var HOSPIT_TRIM_MAP    = {JAN:'T1',FEV:'T1',MAR:'T1',AVR:'T2',MAI:'T2',JUIN:'T2',JUIL:'T3',AOU:'T3',SEP:'T3',OCT:'T4',NOV:'T4',DEC:'T4'};
+var HOSPIT_TRIM_ORDER  = ['T1','T2','T3','T4'];
+var HOSPIT_SVC_LABEL   = {REA:'Réanimation', USI:'Soins Intensifs'};
+var HOSPIT_SVC_COLOR   = {REA:'#7c3aed', USI:'#0369a1'};
 
-// Prestations REA
 var PRES_REA_SEJ  = ['SEJOUR EN REANIMATION'];
 var PRES_REA_SURV = ['SURVEILLANCE REA','COMPLEMENT REANIMATION'];
-
-// Prestations USI
 var PRES_USI_SEJ  = [
   'SEJOUR SOINS INTENSIFS','SEJOUR SOINS INTENSIFS CARDIO',
   'SEJOUR SOINS INTENSIFS CHAMBRE DOUBLE','SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE',
@@ -25,12 +26,15 @@ var PRES_USI_SEJ  = [
 ];
 var PRES_USI_SURV = ['SURVEILLANCE USI','COMPLEMENT SOINS INTENSIFS'];
 
-// Positions fixes dans le fichier source (0-based, confirmées)
-var SRC_IDX = {
-  SEJOUR_NUM:0, SEJOUR_NOM:1, PATIENT:3,
-  FAMILLE_ACTE:24, PRESTATION:26, QUANTITE:30,
-  PRIX:36, COTATION_OBS:41, DATE_PREST:45
-};
+// =======================================================================
+// REGROUPEMENT ORGANISME — tous les "PAYANT ..." dans une seule catégorie
+// =======================================================================
+function hospOrgGroup(raw){
+  var o = (raw||'').trim();
+  if (!o) return '';
+  if (o.toUpperCase().indexOf('PAYANT') > -1) return 'PAYANT AFFILIÉ';
+  return o;
+}
 
 // =======================================================================
 // CHARGEMENT AUTO AU LANCEMENT DU VOLET
@@ -48,6 +52,7 @@ function loadHospitData() {
           selM.innerHTML += '<option value="'+m+'">'+m+'</option>';
         });
       }
+      populateHospitOrgFilter();
       var el = document.getElementById('hospLastUpdate');
       if (el && res.lastUpdate) el.textContent = 'Date d\'actualisation : ' + res.lastUpdate;
       applyHospitFilters();
@@ -59,8 +64,48 @@ function loadHospitData() {
     .getHospitData();
 }
 
+function populateHospitOrgFilter(){
+  var sel = document.getElementById('hospFilterOrg');
+  if (!sel) return;
+  var current = sel.value;
+  var set = {};
+  globalHospitData.forEach(function(d){
+    var g = hospOrgGroup(d.org1);
+    if (g) set[g] = true;
+  });
+  var orgs = Object.keys(set).sort(function(a,b){
+    if (a==='PAYANT AFFILIÉ') return -1;
+    if (b==='PAYANT AFFILIÉ') return 1;
+    return a.localeCompare(b);
+  });
+  sel.innerHTML = '<option value="">TOUT</option>' + orgs.map(function(o){ return '<option value="'+o.replace(/"/g,'&quot;')+'">'+o+'</option>'; }).join('');
+  if (orgs.indexOf(current) > -1) sel.value = current;
+}
+
 // =======================================================================
-// IMPORT FICHIER — ouvre fenêtre de sélection
+// FILTRE SERVICE — pastille binaire REA / USI
+// =======================================================================
+function setHospitServiceFilter(svc){
+  hospServiceFilter = svc;
+  var map = {REA:'btnSvcRea', USI:'btnSvcUsi'};
+  Object.keys(map).forEach(function(k){
+    var btn = document.getElementById(map[k]);
+    if (btn) btn.classList.toggle('active', k===svc);
+  });
+  applyHospitFilters();
+}
+
+function resetHospitFilters(){
+  var e=document.getElementById('hospFilterEntite'); if(e) e.value='';
+  var m=document.getElementById('hospFilterMois');   if(m) m.value='';
+  var c=document.getElementById('hospFilterCateg');  if(c) c.value='';
+  var o=document.getElementById('hospFilterOrg');    if(o) o.value='';
+  var s=document.getElementById('hospSearchInput');  if(s) s.value='';
+  setHospitServiceFilter('REA');
+}
+
+// =======================================================================
+// IMPORT FICHIER
 // =======================================================================
 function handleHospitFiles(files) {
   if (!files||files.length===0) return;
@@ -91,13 +136,12 @@ function processOneHospitFile(file, display, onDone) {
   var reader = new FileReader();
   reader.onload = function(e) {
     try {
-      var wb    = XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true,raw:false,defval:''});
+      var wb    = XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true,raw:true,defval:''});
       var sheet = wb.Sheets[wb.SheetNames[0]];
-      var raw   = XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:''});
+      var raw   = XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,defval:''});
 
       if (!raw||raw.length<2) { alert('Fichier vide.'); onDone(); return; }
 
-      // Trouver la ligne d'en-tête
       var hIdx = -1;
       for (var r=0; r<Math.min(raw.length,5); r++) {
         var norm = raw[r].map(function(c){ return String(c||'').toLowerCase().trim().replace(/\s+/g,'_'); });
@@ -105,19 +149,7 @@ function processOneHospitFile(file, display, onDone) {
       }
       if (hIdx===-1) { alert('En-tête introuvable.'); onDone(); return; }
 
-      // Mapping dynamique par nom — robuste contre tout ordre
       var hRow = raw[hIdx].map(function(h){ return String(h||'').toLowerCase().trim().replace(/\s+/g,'_'); });
-
-      // Passe 1 : collecter les sejour_nom avec un vrai séjour REA/USI
-      var validSn={};
-      raw.slice(hIdx+1).forEach(function(row){
-        if(!row||row.length<5)return;
-        var fv=hospNormStr(getCell(row,hRow.indexOf('famille_acte')));
-        var pv=hospNormStr(getCell(row,hRow.indexOf('prestation')));
-        if(fv==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pv)>-1||PRES_USI_SEJ.indexOf(pv)>-1)){
-          validSn[getCell(row,hRow.indexOf('sejour_nom'))]=true;
-        }
-      });
 
       var idx_sn   = hRow.indexOf('sejour_num');
       var idx_snom = hRow.indexOf('sejour_nom');
@@ -126,18 +158,13 @@ function processOneHospitFile(file, display, onDone) {
       var idx_pres = hRow.indexOf('prestation');
       var idx_qte  = hRow.indexOf('quantite');
       var idx_prix = hRow.indexOf('prix_ttc_avec_remise');
-      var idx_cobs = hRow.indexOf('cotation_observation');
       var idx_date = hRow.indexOf('date_prestation');
+      var idx_org1 = hRow.indexOf('org1');
 
       if (idx_fam===-1||idx_pres===-1||idx_date===-1) {
         alert('Colonnes manquantes : famille_acte, prestation ou date_prestation.');
         onDone(); return;
       }
-
-      var nowD  = new Date();
-      var nowDK = nowD.getFullYear()+'-'+String(nowD.getMonth()+1).padStart(2,'0');
-      var dataRows = raw.slice(hIdx+1);
-      var cleanData = [];
 
       function getCell(row, i) {
         if (i<0||i>=row.length) return '';
@@ -149,7 +176,7 @@ function processOneHospitFile(file, display, onDone) {
         }
         return String(v).trim();
       }
-
+      function hospNormStr(v){ return String(v||'').toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
       function hospParseNum(v) {
         if (v===null||v===undefined||v==='') return '0';
         if (typeof v==='number') return String(v);
@@ -159,7 +186,6 @@ function processOneHospitFile(file, display, onDone) {
         var n = parseFloat(s);
         return isNaN(n) ? '0' : String(n);
       }
-
       function parseDate(val) {
         if (!val||val==='') return null;
         var s = String(val).trim();
@@ -172,11 +198,23 @@ function processOneHospitFile(file, display, onDone) {
         return null;
       }
 
-      function hospNormStr(v){ return String(v||'').toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+      var validSn={};
+      raw.slice(hIdx+1).forEach(function(row){
+        if(!row||row.length<5)return;
+        var fv=hospNormStr(getCell(row,idx_fam));
+        var pv=hospNormStr(getCell(row,idx_pres));
+        if(fv==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pv)>-1||PRES_USI_SEJ.indexOf(pv)>-1)){
+          validSn[getCell(row,idx_snom)]=true;
+        }
+      });
+
+      var nowD  = new Date();
+      var nowDK = nowD.getFullYear()+'-'+String(nowD.getMonth()+1).padStart(2,'0');
+      var dataRows = raw.slice(hIdx+1);
+      var cleanData = [];
 
       dataRows.forEach(function(row) {
         if (!row||row.length<5) return;
-        // Ignorer dossiers sans séjour REA/USI
         var snVal = getCell(row, idx_snom);
         if (!validSn[snVal]) return;
         var rawDate = getCell(row, idx_date);
@@ -190,7 +228,6 @@ function processOneHospitFile(file, display, onDone) {
               || PRES_REA_SURV.indexOf(pres)>-1 || PRES_USI_SURV.indexOf(pres)>-1;
         if (!ok) return;
 
-        var idx_org1=hRow.indexOf('org1');
         cleanData.push([
           getCell(row, idx_sn),
           getCell(row, idx_snom),
@@ -209,7 +246,6 @@ function processOneHospitFile(file, display, onDone) {
         onDone(); return;
       }
 
-      // Vider puis envoyer par chunks
       if (display) display.textContent = 'Vidage '+entity+'…';
       google.script.run
         .withSuccessHandler(function() {
@@ -247,60 +283,184 @@ function detectHospitEntity(name) {
 }
 
 // =======================================================================
-// FILTRAGE
+// FILTRAGE GLOBAL DU VOLET
 // =======================================================================
 function applyHospitFilters() {
-  var service=(document.getElementById('hospFilterService')||{}).value||'';
   var mois=(document.getElementById('hospFilterMois')||{}).value||'';
   var categ=(document.getElementById('hospFilterCateg')||{}).value||'';
   var entite=(document.getElementById('hospFilterEntite')||{}).value||'';
-  var orgFilter=(document.getElementById('hospFilterOrg')||{}).value||'';
+  var org=(document.getElementById('hospFilterOrg')||{}).value||'';
   filteredHospitData=globalHospitData.filter(function(d){
     if(entite&&d.entite!==entite)return false;
-    if(service&&d.service!==service)return false;
+    if(hospServiceFilter&&d.service!==hospServiceFilter)return false;
     if(mois&&d.moisFR!==mois)return false;
     if(categ&&d.categorie!==categ)return false;
-    if(orgFilter==='OCP'&&!(d.org1||'').toUpperCase().includes('OCP'))return false;
-    if(orgFilter==='AUTRE'&&(d.org1||'').toUpperCase().includes('OCP'))return false;
+    if(org&&hospOrgGroup(d.org1)!==org)return false;
     return true;
   });
-  renderHospitKpis();renderHospitCharts();renderHospitTable();
+  renderHospitKpis();renderHospitCategAvg();renderHospitCharts();renderHospitTrend();renderHospitTable();
 }
 
 // =======================================================================
-// KPIs
+// KPIs PRINCIPAUX
 // =======================================================================
 function renderHospitKpis(){
-  function buildKpi(svc){
-    var rows=filteredHospitData.filter(function(d){return d.service===svc;});
-    var byC={A:0,B:0,C:0,D:0},nuit=0,pats=0;
-    rows.forEach(function(d){ byC[d.categorie]=(byC[d.categorie]||0)+1; nuit+=d.nuitees||0; pats+=d.nbPatients||0; });
-    return{nb:rows.length,nuit:nuit,patients:pats,byC:byC};
+  var el;
+  var nb = filteredHospitData.length;
+  var nuit=0, sumTotal=0, sumMontant=0, pats=0;
+  filteredHospitData.forEach(function(d){
+    nuit+=d.nuitees||0;
+    sumTotal+=(d.totalUnitaire||0);
+    sumMontant+=(d.totalUnitaire||0)*(d.nuitees||0);
+    pats+=d.nbPatients||0;
+  });
+  var avgCout = nb>0 ? sumTotal/nb : 0;
+  var avgNuit = nb>0 ? nuit/nb : 0;
+
+  el=document.getElementById('kpiNbDossiers'); if(el) el.textContent=nb.toLocaleString('fr-FR');
+  el=document.getElementById('kpiNbPatients'); if(el) el.textContent='Patients : '+pats.toLocaleString('fr-FR');
+  el=document.getElementById('kpiNuitees');    if(el) el.textContent=nuit.toLocaleString('fr-FR');
+  el=document.getElementById('kpiNuiteesMoy'); if(el) el.textContent='Moy. / dossier : '+avgNuit.toFixed(1);
+  el=document.getElementById('kpiCoutMoyen');  if(el) el.textContent=Math.round(avgCout).toLocaleString('fr-FR')+' DH';
+  el=document.getElementById('kpiMontantTotal'); if(el) el.textContent=Math.round(sumMontant).toLocaleString('fr-FR')+' DH';
+
+  el=document.getElementById('kpiCoutTrend');
+  if (el) {
+    var moisSel=(document.getElementById('hospFilterMois')||{}).value||'';
+    if (!moisSel) {
+      el.textContent = 'Sélectionnez un mois pour comparer';
+    } else {
+      var idxMois = HOSPIT_MOIS_ORDER.indexOf(moisSel);
+      if (idxMois <= 0) {
+        el.textContent = 'Pas de mois antérieur';
+      } else {
+        var moisPrec = HOSPIT_MOIS_ORDER[idxMois-1];
+        var entite=(document.getElementById('hospFilterEntite')||{}).value||'';
+        var prevSet = globalHospitData.filter(function(d){
+          if (entite && d.entite!==entite) return false;
+          if (hospServiceFilter && d.service!==hospServiceFilter) return false;
+          return d.moisFR===moisPrec;
+        });
+        if (prevSet.length===0) {
+          el.textContent = 'Pas de données mois précédent';
+        } else {
+          var prevAvg = prevSet.reduce(function(s,d){return s+(d.totalUnitaire||0);},0)/prevSet.length;
+          var diff = avgCout - prevAvg;
+          var pct = prevAvg>0 ? (diff/prevAvg*100) : 0;
+          var arrow = diff>=0 ? '▲' : '▼';
+          var color = diff>=0 ? '#ef4444' : '#10b981';
+          el.innerHTML = '<span style="color:'+color+';font-weight:800;">'+arrow+' '+Math.abs(pct).toFixed(1)+'%</span> vs '+moisPrec;
+        }
+      }
+    }
   }
-  var rea=buildKpi('REA'),usi=buildKpi('USI'),el;
-  el=document.getElementById('kpiReaDossiers');  if(el)el.textContent=rea.nb.toLocaleString('fr-FR');
-  el=document.getElementById('kpiReaNuitees');   if(el)el.innerHTML='Nuitées : <strong>'+rea.nuit.toLocaleString('fr-FR')+'</strong>&nbsp;&nbsp;|&nbsp;&nbsp;Patients : <strong>'+rea.patients.toLocaleString('fr-FR')+'</strong>';
-  el=document.getElementById('kpiReaCateg');     if(el)el.innerHTML=buildCategHtml(rea);
-  el=document.getElementById('kpiUsiDossiers');  if(el)el.textContent=usi.nb.toLocaleString('fr-FR');
-  el=document.getElementById('kpiUsiNuitees');   if(el)el.innerHTML='Nuitées : <strong>'+usi.nuit.toLocaleString('fr-FR')+'</strong>&nbsp;&nbsp;|&nbsp;&nbsp;Patients : <strong>'+usi.patients.toLocaleString('fr-FR')+'</strong>';
-  el=document.getElementById('kpiUsiCateg');     if(el)el.innerHTML=buildCategHtml(usi);
 }
 
-function buildCategHtml(kpi){
-  var total=kpi.nb,COLORS={A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'},BG={A:'#d1fae5',B:'#e0e7ff',C:'#fef3c7',D:'#fee2e2'};
-  return['A','B','C','D'].map(function(c){var n=kpi.byC[c]||0,p=total?Math.round(n*100/total):0;return'<span style="display:inline-flex;align-items:center;gap:4px;background:'+BG[c]+';color:'+COLORS[c]+';padding:3px 9px;border-radius:20px;font-weight:800;font-size:.9em;margin:2px;">Cat.'+c+' : '+n+' <span style="font-weight:600;opacity:.75;">('+p+'%)</span></span>';}).join('');
+// =======================================================================
+// MOYENNE PAR CATÉGORIE
+// =======================================================================
+function renderHospitCategAvg(){
+  var groups={A:[],B:[],C:[],D:[]};
+  filteredHospitData.forEach(function(d){ if(groups[d.categorie]) groups[d.categorie].push(d.totalUnitaire||0); });
+  ['A','B','C','D'].forEach(function(c){
+    var arr=groups[c];
+    var avg = arr.length ? arr.reduce(function(s,v){return s+v;},0)/arr.length : 0;
+    var elAvg=document.getElementById('kpiAvg'+c), elCnt=document.getElementById('kpiCount'+c);
+    if(elAvg) elAvg.textContent = arr.length ? Math.round(avg).toLocaleString('fr-FR')+' DH' : '--';
+    if(elCnt) elCnt.textContent = arr.length+' dossier(s)';
+  });
+}
+
+// =======================================================================
+// TENDANCE — coût moyen par période, suit le filtre Service, épurée et attractive
+// =======================================================================
+function setHospitPeriod(mode){
+  hospPeriodMode = mode;
+  ['mois','trim','annee'].forEach(function(m){
+    var btn=document.getElementById('btnPer'+(m==='mois'?'Mois':m==='trim'?'Trim':'Annee'));
+    if(btn) btn.classList.toggle('active', m===mode);
+  });
+  renderHospitTrend();
+}
+
+function renderHospitTrend(){
+  var ctx=document.getElementById('chartHospitTrend'); if(!ctx) return;
+  if(hospChartTrendInst){ hospChartTrendInst.destroy(); hospChartTrendInst=null; }
+
+  var titleEl=document.getElementById('hospTrendTitle');
+  if(titleEl) titleEl.textContent = 'Évolution du coût moyen unitaire · '+(HOSPIT_SVC_LABEL[hospServiceFilter]||'');
+
+  var entite=(document.getElementById('hospFilterEntite')||{}).value||'';
+  var categ=(document.getElementById('hospFilterCateg')||{}).value||'';
+  var org=(document.getElementById('hospFilterOrg')||{}).value||'';
+  var src = globalHospitData.filter(function(d){
+    if(d.service!==hospServiceFilter) return false;
+    if(entite && d.entite!==entite) return false;
+    if(categ && d.categorie!==categ) return false;
+    if(org && hospOrgGroup(d.org1)!==org) return false;
+    return true;
+  });
+
+  function periodKey(mFR){
+    if(!mFR) return null;
+    if(hospPeriodMode==='mois') return mFR;
+    if(hospPeriodMode==='trim') return HOSPIT_TRIM_MAP[mFR]||null;
+    return '2026';
+  }
+  var labels = hospPeriodMode==='mois' ? HOSPIT_MOIS_ORDER : hospPeriodMode==='trim' ? HOSPIT_TRIM_ORDER : ['2026'];
+
+  var bucket={};
+  labels.forEach(function(l){ bucket[l]=[]; });
+  src.forEach(function(d){
+    var pk=periodKey(d.moisFR);
+    if(pk && bucket[pk]) bucket[pk].push(d.totalUnitaire||0);
+  });
+
+  var usedLabels = labels.filter(function(l){ return bucket[l].length>0; });
+  function avgOf(arr){ return arr.length ? arr.reduce(function(s,v){return s+v;},0)/arr.length : null; }
+  var dataVals = usedLabels.map(function(l){ return avgOf(bucket[l]); });
+  var color = HOSPIT_SVC_COLOR[hospServiceFilter] || '#6366f1';
+
+  var canvasCtx = ctx.getContext('2d');
+  var gradient = canvasCtx.createLinearGradient(0,0,0,300);
+  gradient.addColorStop(0, color+'55');
+  gradient.addColorStop(1, color+'02');
+
+  hospChartTrendInst = new Chart(canvasCtx, {
+    type:'line',
+    data:{
+      labels: usedLabels,
+      datasets:[
+        { label:HOSPIT_SVC_LABEL[hospServiceFilter], data:dataVals,
+          borderColor:color, backgroundColor:gradient, fill:true,
+          tension:.4, spanGaps:true, pointRadius:6, pointHoverRadius:9,
+          pointBackgroundColor:'#fff', pointBorderColor:color, pointBorderWidth:3,
+          borderWidth:4 }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ top:28, right:26, left:26, bottom:4 } },
+      plugins:{
+        legend:{display:false},
+        datalabels:{
+          align:'top', anchor:'end', font:{size:12,weight:'800'}, color:'#1e293b', clamp:true, clip:false,
+          formatter:function(v){ return v==null ? '' : Math.round(v).toLocaleString('fr-FR')+' DH'; }
+        },
+        tooltip:{ backgroundColor:'#1e293b', padding:10, cornerRadius:8, callbacks:{ label:function(c){ return ' '+Math.round(c.raw).toLocaleString('fr-FR')+' DH'; } } }
+      },
+      scales:{
+        x:{ grid:{display:false}, border:{display:false}, ticks:{font:{size:12,weight:'800'},color:'#475569'}, offset:true },
+        y:{ display:false, grid:{display:false} }
+      }
+    }
+  });
 }
 
 // =======================================================================
 // GRAPHIQUES
 // =======================================================================
 function renderHospitCharts(){renderHospitDonut();renderHospitBar();}
-
-function setHospitChartService(svc){
-  hospBarService=svc;
-  ['ALL','REA','USI'].forEach(function(s){var btn=document.getElementById('btnHosp'+(s==='ALL'?'All':s==='REA'?'Rea':'Usi'));if(btn)btn.classList.toggle('active',s===svc);});
-  renderHospitBar();
-}
 
 function renderHospitDonut(){
   var ctx=document.getElementById('chartHospitDonut');if(!ctx)return;
@@ -309,20 +469,102 @@ function renderHospitDonut(){
   hospChartDonutInst=new Chart(ctx.getContext('2d'),{type:'doughnut',data:{labels:['Catégorie A','Catégorie B','Catégorie C','Catégorie D'],datasets:[{data:[C.A,C.B,C.C,C.D],backgroundColor:['#10b981','#6366f1','#f59e0b','#ef4444'],borderWidth:3,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{usePointStyle:true,pointStyle:'circle',padding:12,font:{size:11,weight:'700'}}},datalabels:{color:'#fff',font:{weight:'800',size:12},formatter:function(v){return T?Math.round(v*100/T)+'%':'';}},tooltip:{callbacks:{label:function(c){return' '+c.label+' : '+c.raw+' dossier(s)';}}}}}});
 }
 
+var HOSP_BAR_CAT_ORDER = ['D','C','B','A'];
+var HOSP_BAR_CAT_COLOR = {D:'#ef4444',C:'#f59e0b',B:'#6366f1',A:'#10b981'};
+
 function renderHospitBar(){
   var ctx=document.getElementById('chartHospitBar');if(!ctx)return;
   if(hospChartBarInst){hospChartBarInst.destroy();hospChartBarInst=null;}
-  var src=hospBarService==='ALL'?filteredHospitData:filteredHospitData.filter(function(d){return d.service===hospBarService;});
+  var src=filteredHospitData;
   var mSet={};src.forEach(function(d){if(d.moisFR)mSet[d.moisFR]=true;});
   var labels=HOSPIT_MOIS_ORDER.filter(function(m){return mSet[m];});
   var byM={};labels.forEach(function(m){byM[m]={A:0,B:0,C:0,D:0};});
   src.forEach(function(d){if(d.moisFR&&byM[d.moisFR])byM[d.moisFR][d.categorie]++;});
-  function ds(c,col){return{label:'Cat. '+c,data:labels.map(function(m){return byM[m][c]||0;}),backgroundColor:col,borderRadius:6,borderSkipped:false,stack:'s'};}
-  hospChartBarInst=new Chart(ctx.getContext('2d'),{type:'bar',data:{labels:labels,datasets:[ds('D','#ef4444'),ds('C','#f59e0b'),ds('B','#6366f1'),ds('A','#10b981')]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',align:'end',labels:{usePointStyle:true,pointStyle:'rectRounded',padding:12,font:{size:11,weight:'700'}}},datalabels:{display:false},tooltip:{mode:'index',intersect:false}},scales:{x:{grid:{display:false},border:{display:false},ticks:{font:{size:11,weight:'700'}}},y:{beginAtZero:true,grid:{color:'#f1f5f9'},border:{display:false},ticks:{precision:0,font:{size:11}}}}}});
+
+  function ds(c){
+    return{
+      label:'Cat. '+c,
+      data:labels.map(function(m){return byM[m][c]||0;}),
+      backgroundColor:HOSP_BAR_CAT_COLOR[c],
+      borderRadius:4, borderSkipped:false, stack:'s'
+    };
+  }
+  var datasets = HOSP_BAR_CAT_ORDER.map(ds);
+
+  hospChartBarInst=new Chart(ctx.getContext('2d'),{
+    type:'bar',
+    data:{labels:labels,datasets:datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      onClick:function(evt, elements){
+        if(!elements||!elements.length) return;
+        var el = elements[0];
+        var cat = HOSP_BAR_CAT_ORDER[el.datasetIndex];
+        var mois = labels[el.index];
+        openHospitCategModal(mois, cat, src);
+      },
+      onHover:function(evt, elements){ evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+      plugins:{
+        legend:{position:'top', align:'end', labels:{usePointStyle:true, pointStyle:'rectRounded', padding:12, font:{size:11,weight:'700'}}},
+        datalabels:{
+          color:'#fff', font:{size:10,weight:'800'}, clamp:true,
+          formatter:function(v, ctx2){
+            var m = labels[ctx2.dataIndex];
+            var tot = byM[m].A+byM[m].B+byM[m].C+byM[m].D;
+            if(!v || !tot) return '';
+            var pct = Math.round(v*100/tot);
+            return pct+'%';
+          },
+          display:function(ctx2){ return ctx2.dataset.data[ctx2.dataIndex] > 0; }
+        },
+        tooltip:{mode:'index',intersect:false}
+      },
+      scales:{
+        x:{ display:false, grid:{display:false} },
+        y:{ display:false, grid:{display:false} }
+      }
+    }
+  });
 }
 
 // =======================================================================
-// TABLEAU — sans patient, avec bouton HIS
+// MODALE DÉTAIL CATÉGORIE
+// =======================================================================
+function openHospitCategModal(mois, cat, src){
+  var rows = src.filter(function(d){ return d.moisFR===mois && d.categorie===cat; });
+  rows.sort(function(a,b){ return (b.dateKey||'').localeCompare(a.dateKey||''); });
+
+  var title = document.getElementById('hospModalTitle');
+  if (title) title.textContent = 'Catégorie '+cat+' · '+mois+' 2026 ('+rows.length+' dossier(s))';
+
+  var body = document.getElementById('hospModalBody');
+  if (body) {
+    var SVCBG={REA:'#ede9fe',USI:'#e0f2fe'},SVCCL={REA:'#7c3aed',USI:'#0369a1'};
+    body.innerHTML = rows.map(function(d){
+      var ss='background:'+(SVCBG[d.service]||'#f1f5f9')+';color:'+(SVCCL[d.service]||'#64748b')+';padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;';
+      var hisBtn=(d.sejourNum&&d.entite)?'<a href="http://visionhis.'+d.entite.toLowerCase()+'/visionhis/?m=dPfact&tab=vw_cotation&fact_sejour_id='+d.sejourNum+'&ver=facturable" target="_blank" style="color:#3b82f6;"><i class="fas fa-external-link-alt"></i></a>':'–';
+      return '<tr style="border-bottom:1px solid #f1f5f9;">'+
+        '<td style="padding:9px 14px;font-weight:700;color:#6366f1;">'+(d.sejourNom||'–')+'</td>'+
+        '<td style="padding:9px 14px;color:#64748b;">'+(d.dateKey||'–')+'</td>'+
+        '<td style="padding:9px 14px;"><span style="'+ss+'">'+(d.service||'–')+'</span></td>'+
+        '<td style="padding:9px 14px;color:#64748b;">'+(d.entite||'–')+'</td>'+
+        '<td style="padding:9px 14px;text-align:right;font-weight:700;">'+(d.nuitees||0)+'</td>'+
+        '<td style="padding:9px 14px;text-align:right;font-weight:800;">'+Math.round(d.totalUnitaire||0).toLocaleString('fr-FR')+' DH</td>'+
+        '<td style="padding:9px 14px;text-align:center;">'+hisBtn+'</td>'+
+        '</tr>';
+    }).join('') || '<tr><td colspan="7" style="padding:30px;text-align:center;color:#94a3b8;">Aucun dossier</td></tr>';
+  }
+
+  var overlay = document.getElementById('hospModalOverlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+function closeHospitModal(){
+  var overlay = document.getElementById('hospModalOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// =======================================================================
+// TABLEAU
 // =======================================================================
 function renderHospitTable(){
   var tbody=document.getElementById('hospTableBody'),countEl=document.getElementById('hospTableCount');
@@ -339,7 +581,7 @@ function renderHospitTable(){
     var ml=d.moisFR?d.moisFR+' 2026':'–';
     var ss='background:'+(SVCBG[d.service]||'#f1f5f9')+';color:'+(SVCCL[d.service]||'#64748b')+';padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;';
     var cs=(CB[d.categorie]||'background:#f1f5f9;color:#64748b')+';display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;font-size:12px;font-weight:800;';
-    var hisBtn=d.sejourNum?'<a href="http://visionhis.cik/visionhis/?m=dPfact&tab=vw_cotation&fact_sejour_id='+d.sejourNum+'&ver=facturable" target="_blank" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;background:#eff6ff;color:#3b82f6;border:1px solid #bfdbfe;text-decoration:none;font-size:11px;"><i class="fas fa-external-link-alt"></i></a>':'–';
+    var hisBtn=(d.sejourNum&&d.entite)?'<a href="http://visionhis.'+d.entite.toLowerCase()+'/visionhis/?m=dPfact&tab=vw_cotation&fact_sejour_id='+d.sejourNum+'&ver=facturable" target="_blank" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;background:#eff6ff;color:#3b82f6;border:1px solid #bfdbfe;text-decoration:none;font-size:11px;"><i class="fas fa-external-link-alt"></i></a>':'–';
     html+='<tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8f9fd\'" onmouseout="this.style.background=\'\'">'+
       '<td style="padding:9px 12px;font-weight:700;color:#6366f1;">'+(d.sejourNom||'–')+'</td>'+
       '<td style="padding:9px 12px;"><span style="'+ss+'">'+(d.service||'–')+'</span></td>'+
@@ -352,7 +594,7 @@ function renderHospitTable(){
       '<td style="padding:9px 12px;text-align:center;">'+hisBtn+'</td>'+
       '</tr>';
   });
-  tbody.innerHTML=html||'<tr><td colspan="10" style="padding:30px;text-align:center;color:#94a3b8;font-weight:600;">Aucun dossier trouvé</td></tr>';
+  tbody.innerHTML=html||'<tr><td colspan="9" style="padding:30px;text-align:center;color:#94a3b8;font-weight:600;">Aucun dossier trouvé</td></tr>';
 }
 
 // =======================================================================

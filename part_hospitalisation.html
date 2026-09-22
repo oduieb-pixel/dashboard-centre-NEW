@@ -6,7 +6,7 @@
     <div style="display:flex;align-items:center;gap:16px;position:relative;z-index:1;">
       <div style="width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;"><i class="fas fa-hospital"></i></div>
       <div style="display:flex;flex-direction:column;gap:3px;">
-        <div style="color:#fff;font-size:16px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;">SUIVI HOSPITALISATION — REA &amp; SOINS INTENSIFS · 2026</div>
+        <div style="color:#fff;font-size:16px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;">SUIVI HOSPITALISATION</div>
         <div id="hospLastUpdate" style="color:rgba(255,255,255,.78);font-size:12px;font-weight:700;">Date d'actualisation : --/--/----</div>
       </div>
     </div>
@@ -21,26 +21,23 @@
 
   <!-- FILTRES -->
   <div class="modern-filter-box" style="background:#fff;padding:16px 20px;margin-bottom:20px;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.10);border:1px solid #d7deea;border-top:4px solid #6366f1;">
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;">
       <div class="sec-filter-group">
         <label>Entité</label>
         <select id="hospFilterEntite" onchange="applyHospitFilters()">
-          <option value="">TOUT</option>
-          <option value="CIK">CIK</option>
+          <option value="CIK" selected>CIK</option>
           <option value="HIIN">HIIN</option>
           <option value="CSS">CSS</option>
-          <option value="CIOB">CIOB</option>
           <option value="CIMO">CIMO</option>
           <option value="HPB">HPB</option>
         </select>
       </div>
       <div class="sec-filter-group">
         <label>Service</label>
-        <select id="hospFilterService" onchange="applyHospitFilters()">
-          <option value="">TOUT</option>
-          <option value="REA">Réanimation</option>
-          <option value="USI">Soins Intensifs</option>
-        </select>
+        <div style="background:#f4f6f8;border-radius:20px;padding:3px;display:flex;gap:2px;">
+          <button type="button" onclick="setHospitServiceFilter('REA')" class="toggle-chart-btn active" id="btnSvcRea">Réanimation</button>
+          <button type="button" onclick="setHospitServiceFilter('USI')" class="toggle-chart-btn" id="btnSvcUsi">Soins Intensifs</button>
+        </div>
       </div>
       <div class="sec-filter-group">
         <label>Mois (2026)</label>
@@ -62,49 +59,92 @@
         <label>Organisme</label>
         <select id="hospFilterOrg" onchange="applyHospitFilters()">
           <option value="">TOUT</option>
-          <option value="OCP">OCP</option>
-          <option value="AUTRE">Hors OCP</option>
         </select>
       </div>
       <div class="sec-filter-group">
         <label>Recherche dossier</label>
         <input type="text" id="hospSearchInput" placeholder="N° dossier…" oninput="renderHospitTable()" style="padding:8px 12px;border:1px solid #e8ecf4;border-radius:8px;background:#f8f9fa;font-family:inherit;font-size:0.85em;font-weight:600;color:#1a1d2e;outline:none;width:150px;">
       </div>
+      <div class="sec-filter-group">
+        <label>&nbsp;</label>
+        <button type="button" onclick="resetHospitFilters()" style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;font-size:0.85em;font-weight:700;cursor:pointer;">
+          <i class="fas fa-rotate-left"></i> Réinitialiser
+        </button>
+      </div>
     </div>
   </div>
 
-  <!-- KPI CARDS -->
-  <div class="cards-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;">
-    <div class="stat-card" style="border-top:4px solid #7c3aed;position:relative;overflow:hidden;">
-      <div style="position:relative;z-index:2;">
-        <div class="stat-title">DOSSIERS REA</div>
-        <div id="kpiReaDossiers" class="stat-value" style="color:#7c3aed;font-size:1.6em;">--</div>
-        <div class="stat-sub" id="kpiReaNuitees">Nuitées : --</div>
-      </div>
-      <i class="fas fa-bed card-bg-icon" style="color:#7c3aed;"></i>
-    </div>
-    <div class="stat-card" style="border-top:4px solid #0369a1;position:relative;overflow:hidden;">
-      <div style="position:relative;z-index:2;">
-        <div class="stat-title">DOSSIERS SOINS INTENSIFS</div>
-        <div id="kpiUsiDossiers" class="stat-value" style="color:#0369a1;font-size:1.6em;">--</div>
-        <div class="stat-sub" id="kpiUsiNuitees">Nuitées : --</div>
-      </div>
-      <i class="fas fa-heartbeat card-bg-icon" style="color:#0369a1;"></i>
-    </div>
+  <!-- KPI CARDS PRINCIPAUX -->
+  <div class="cards-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
     <div class="stat-card" style="border-top:4px solid #6366f1;position:relative;overflow:hidden;">
       <div style="position:relative;z-index:2;">
-        <div class="stat-title">RÉANIMATION — CATÉGORIES</div>
-        <div id="kpiReaCateg" style="margin-top:8px;font-size:0.88em;">--</div>
+        <div class="stat-title">DOSSIERS (filtre actif)</div>
+        <div id="kpiNbDossiers" class="stat-value" style="color:#6366f1;font-size:1.6em;">--</div>
+        <div class="stat-sub" id="kpiNbPatients">Patients : --</div>
       </div>
-      <i class="fas fa-tags card-bg-icon"></i>
+      <i class="fas fa-folder-open card-bg-icon" style="color:#6366f1;"></i>
     </div>
-    <div class="stat-card" style="border-top:4px solid #06b6d4;position:relative;overflow:hidden;">
+    <div class="stat-card" style="border-top:4px solid #0ea5e9;position:relative;overflow:hidden;">
       <div style="position:relative;z-index:2;">
-        <div class="stat-title">SOINS INTENSIFS — CATÉGORIES</div>
-        <div id="kpiUsiCateg" style="margin-top:8px;font-size:0.88em;">--</div>
+        <div class="stat-title">NUITÉES TOTALES</div>
+        <div id="kpiNuitees" class="stat-value" style="color:#0ea5e9;font-size:1.6em;">--</div>
+        <div class="stat-sub" id="kpiNuiteesMoy">Moy. / dossier : --</div>
       </div>
-      <i class="fas fa-tags card-bg-icon" style="color:#06b6d4;"></i>
+      <i class="fas fa-bed card-bg-icon" style="color:#0ea5e9;"></i>
     </div>
+    <div class="stat-card" style="border-top:4px solid #10b981;position:relative;overflow:hidden;">
+      <div style="position:relative;z-index:2;">
+        <div class="stat-title">COÛT MOYEN UNITAIRE / NUIT</div>
+        <div id="kpiCoutMoyen" class="stat-value" style="color:#10b981;font-size:1.6em;">--</div>
+        <div class="stat-sub" id="kpiCoutTrend">vs mois précédent : --</div>
+      </div>
+      <i class="fas fa-coins card-bg-icon" style="color:#10b981;"></i>
+    </div>
+    <div class="stat-card" style="border-top:4px solid #f59e0b;position:relative;overflow:hidden;">
+      <div style="position:relative;z-index:2;">
+        <div class="stat-title">MONTANT TOTAL ENGAGÉ</div>
+        <div id="kpiMontantTotal" class="stat-value" style="color:#f59e0b;font-size:1.5em;">--</div>
+        <div class="stat-sub">Séjour + Surveillance, filtre actif</div>
+      </div>
+      <i class="fas fa-file-invoice-dollar card-bg-icon" style="color:#f59e0b;"></i>
+    </div>
+  </div>
+
+  <!-- MOYENNE PAR CATÉGORIE -->
+  <div class="cards-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;">
+    <div class="stat-card" style="border-top:4px solid #10b981;background:#f0fdf9;">
+      <div class="stat-title" style="color:#065f46;">CATÉGORIE A · coût moyen</div>
+      <div id="kpiAvgA" class="stat-value" style="color:#10b981;font-size:1.4em;">--</div>
+      <div class="stat-sub" id="kpiCountA">-- dossier(s)</div>
+    </div>
+    <div class="stat-card" style="border-top:4px solid #6366f1;background:#f5f5ff;">
+      <div class="stat-title" style="color:#3730a3;">CATÉGORIE B · coût moyen</div>
+      <div id="kpiAvgB" class="stat-value" style="color:#6366f1;font-size:1.4em;">--</div>
+      <div class="stat-sub" id="kpiCountB">-- dossier(s)</div>
+    </div>
+    <div class="stat-card" style="border-top:4px solid #f59e0b;background:#fffbeb;">
+      <div class="stat-title" style="color:#92400e;">CATÉGORIE C · coût moyen</div>
+      <div id="kpiAvgC" class="stat-value" style="color:#f59e0b;font-size:1.4em;">--</div>
+      <div class="stat-sub" id="kpiCountC">-- dossier(s)</div>
+    </div>
+    <div class="stat-card" style="border-top:4px solid #ef4444;background:#fef2f2;">
+      <div class="stat-title" style="color:#991b1b;">CATÉGORIE D · coût moyen</div>
+      <div id="kpiAvgD" class="stat-value" style="color:#ef4444;font-size:1.4em;">--</div>
+      <div class="stat-sub" id="kpiCountD">-- dossier(s)</div>
+    </div>
+  </div>
+
+  <!-- TENDANCE COÛT MOYEN -->
+  <div class="chart-container" style="background:linear-gradient(180deg,#fff 0%,#fafbff 100%);border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.04);padding:20px;margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <h4 id="hospTrendTitle" style="margin:0;color:#333;font-size:1em;font-weight:700;">Évolution du coût moyen unitaire · Réanimation</h4>
+      <div style="background:#f4f6f8;border-radius:20px;padding:3px;display:flex;gap:2px;">
+        <button onclick="setHospitPeriod('mois')" class="toggle-chart-btn active" id="btnPerMois">Mensuel</button>
+        <button onclick="setHospitPeriod('trim')" class="toggle-chart-btn" id="btnPerTrim">Trimestriel</button>
+        <button onclick="setHospitPeriod('annee')" class="toggle-chart-btn" id="btnPerAnnee">Annuel</button>
+      </div>
+    </div>
+    <div style="height:300px;"><canvas id="chartHospitTrend"></canvas></div>
   </div>
 
   <!-- GRAPHIQUES -->
@@ -114,15 +154,9 @@
       <div style="height:290px;"><canvas id="chartHospitDonut"></canvas></div>
     </div>
     <div class="chart-container" style="flex:2;min-width:400px;height:360px;background:#fff;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.04);padding:20px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <h4 style="margin:0;color:#333;font-size:1em;font-weight:700;">Évolution mensuelle — Dossiers par catégorie</h4>
-        <div style="background:#f4f6f8;border-radius:20px;padding:3px;display:flex;gap:2px;">
-          <button onclick="setHospitChartService('ALL')" class="toggle-chart-btn active" id="btnHospAll">Tout</button>
-          <button onclick="setHospitChartService('REA')" class="toggle-chart-btn" id="btnHospRea">REA</button>
-          <button onclick="setHospitChartService('USI')" class="toggle-chart-btn" id="btnHospUsi">USI</button>
-        </div>
-      </div>
-      <div style="height:290px;"><canvas id="chartHospitBar"></canvas></div>
+      <h4 style="margin:0 0 12px;color:#333;font-size:1em;font-weight:700;">Évolution mensuelle · Dossiers par catégorie</h4>
+      <div style="font-size:0.72em;color:#94a3b8;font-weight:600;margin:-8px 0 8px;">Cliquez sur une catégorie pour voir le détail</div>
+      <div style="height:270px;"><canvas id="chartHospitBar"></canvas></div>
     </div>
   </div>
 
@@ -158,6 +192,33 @@
   </div>
 
 </div>
+
+<!-- MODALE DÉTAIL CATÉGORIE -->
+<div id="hospModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9998;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeHospitModal()">
+  <div style="background:#fff;border-radius:14px;max-width:900px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden;">
+    <div style="padding:16px 22px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#f9fafc;">
+      <h4 id="hospModalTitle" style="margin:0;color:#1e293b;font-weight:800;">Détail</h4>
+      <button onclick="closeHospitModal()" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#94a3b8;">&times;</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:0;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85em;">
+        <thead style="position:sticky;top:0;background:#f9f9f9;">
+          <tr>
+            <th style="padding:10px 14px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Dossier</th>
+            <th style="padding:10px 14px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Date</th>
+            <th style="padding:10px 14px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Service</th>
+            <th style="padding:10px 14px;text-align:left;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Entité</th>
+            <th style="padding:10px 14px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Nuitées</th>
+            <th style="padding:10px 14px;text-align:right;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">Total unit.</th>
+            <th style="padding:10px 14px;text-align:center;font-size:0.75em;color:#94a3b8;text-transform:uppercase;font-weight:800;border-bottom:2px solid #e8ecf4;">HIS</th>
+          </tr>
+        </thead>
+        <tbody id="hospModalBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <style>
 .card-bg-icon{position:absolute;right:-15px;bottom:-20px;font-size:6em;opacity:.08;transform:rotate(-15deg);pointer-events:none;}
 </style>
