@@ -18,13 +18,23 @@ var HOSPIT_SVC_LABEL   = {REA:'Réanimation', USI:'Soins Intensifs'};
 var HOSPIT_SVC_COLOR   = {REA:'#7c3aed', USI:'#0369a1'};
 
 var PRES_REA_SEJ  = ['SEJOUR EN REANIMATION'];
-var PRES_REA_SURV = ['SURVEILLANCE REA','COMPLEMENT REANIMATION'];
 var PRES_USI_SEJ  = [
   'SEJOUR SOINS INTENSIFS','SEJOUR SOINS INTENSIFS CARDIO',
   'SEJOUR SOINS INTENSIFS CHAMBRE DOUBLE','SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE',
   'SUITE SOINS INTENSIFS','MINI SUITE SOINS INTENSIFS'
 ];
-var PRES_USI_SURV = ['SURVEILLANCE USI','COMPLEMENT SOINS INTENSIFS'];
+var PRES_REA_SURV_EXACT = ['COMPLEMENT REANIMATION','SURVEILLANCE PEDIATRIQUE'];
+var PRES_USI_SURV_EXACT = ['COMPLEMENT SOINS INTENSIFS'];
+function hospIsReaSurv(pres){
+  if(PRES_REA_SURV_EXACT.indexOf(pres)>-1) return true;
+  var p = pres.replace(/\./g,' ').replace(/\s+/g,' ').trim();
+  return p.indexOf('SURVEILLANCE')>-1 && p.indexOf('USI')===-1 && p.indexOf('REA')>-1;
+}
+function hospIsUsiSurv(pres){
+  if(PRES_USI_SURV_EXACT.indexOf(pres)>-1) return true;
+  var p = pres.replace(/\./g,' ').replace(/\s+/g,' ').trim();
+  return p.indexOf('SURVEILLANCE')>-1 && p.indexOf('USI')>-1;
+}
 
 // =======================================================================
 // REGROUPEMENT ORGANISME — tous les "PAYANT ..." dans une seule catégorie
@@ -225,7 +235,7 @@ function processOneHospitFile(file, display, onDone) {
         var pres = hospNormStr(getCell(row, idx_pres));
 
         var ok = (fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1))
-              || PRES_REA_SURV.indexOf(pres)>-1 || PRES_USI_SURV.indexOf(pres)>-1;
+              || hospIsReaSurv(pres) || hospIsUsiSurv(pres);
         if (!ok) return;
 
         cleanData.push([

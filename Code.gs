@@ -3052,8 +3052,19 @@ var PRES_USI_SEJ  = [
   'SEJOUR SOINS INTENSIFS CHAMBRE DOUBLE','SEJOUR SOINS INTENSIFS CHAMBRE INDIVIDUELLE',
   'SUITE SOINS INTENSIFS','MINI SUITE SOINS INTENSIFS'
 ];
-var PRES_REA_SURV = ['SURVEILLANCE REA','COMPLEMENT REANIMATION'];
-var PRES_USI_SURV = ['SURVEILLANCE USI','COMPLEMENT SOINS INTENSIFS'];
+var PRES_REA_SURV_EXACT = ['COMPLEMENT REANIMATION','SURVEILLANCE PEDIATRIQUE'];
+var PRES_USI_SURV_EXACT = ['COMPLEMENT SOINS INTENSIFS'];
+
+function hIsReaSurv(pres){
+  if(PRES_REA_SURV_EXACT.indexOf(pres)>-1) return true;
+  var p = pres.replace(/\./g,' ').replace(/\s+/g,' ').trim();
+  return p.indexOf('SURVEILLANCE')>-1 && p.indexOf('USI')===-1 && p.indexOf('REA')>-1;
+}
+function hIsUsiSurv(pres){
+  if(PRES_USI_SURV_EXACT.indexOf(pres)>-1) return true;
+  var p = pres.replace(/\./g,' ').replace(/\s+/g,' ').trim();
+  return p.indexOf('SURVEILLANCE')>-1 && p.indexOf('USI')>-1;
+}
 var MONTHS_FR = ['JAN','FEV','MAR','AVR','MAI','JUIN','JUIL','AOU','SEP','OCT','NOV','DEC'];
 
 // -----------------------------------------------------------------------
@@ -3160,7 +3171,7 @@ function importHospitFromSheet(entity){
         var fam=hNorm(row[SRC.FAMILLE_ACTE]);
         var pres=hNorm(row[SRC.PRESTATION]);
         var ok=(fam==='SEJOUR'&&(PRES_REA_SEJ.indexOf(pres)>-1||PRES_USI_SEJ.indexOf(pres)>-1))
-             ||PRES_REA_SURV.indexOf(pres)>-1||PRES_USI_SURV.indexOf(pres)>-1;
+             ||hIsReaSurv(pres)||hIsUsiSurv(pres);
         if(!ok)return;
         clean.push([hGet(row,SRC.SEJOUR_NUM),snom,hGet(row,SRC.PATIENT),
           hGet(row,SRC.ORG1),fam,pres,hGet(row,SRC.QUANTITE),
@@ -3245,9 +3256,9 @@ function getHospitData(){
           d.rea_sej.push({prix:prix,qte:qte>0?qte:1,dk:dk,mFR:mFR});
         } else if(fam==='SEJOUR'&&PRES_USI_SEJ.indexOf(pres)>-1){
           d.usi_sej.push({prix:prix,qte:qte>0?qte:1,dk:dk,mFR:mFR});
-        } else if(PRES_REA_SURV.indexOf(pres)>-1){
+        } else if(hIsReaSurv(pres)){
           d.rea_surv.push({prix:prix,qte:qte});
-        } else if(PRES_USI_SURV.indexOf(pres)>-1){
+        } else if(hIsUsiSurv(pres)){
           d.usi_surv.push({prix:prix,qte:qte});
         }
       });
