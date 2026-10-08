@@ -3376,3 +3376,103 @@ function diagHospit() {
   Logger.log(out.join('\n'));
   return out.join('\n');
 }
+// =======================================================================
+// MODULE RESTAURATION — BACKEND V1
+// Source : feuille "BDD RESTAU" du fichier "Reporting Region Centre 2026"
+// (alimentée par IMPORTRANGE depuis les 15 fichiers de suivi mensuels)
+// Structure BDD RESTAU : ligne 3 = jours du mois (F3:H3) ; ligne 4 = en-têtes ;
+// données dès la ligne 5 : A Entité | B Clé | C Service | D Indicateur | E Unité |
+// F Octobre | G Novembre | H Décembre | I Total T4
+// =======================================================================
+
+var RESTAU_SHEET      = 'BDD RESTAU';
+var RESTAU_LIEN_SHEET = 'LIEN RESTAU';
+var RESTAU_CACHE_KEY  = 'RESTAU_DATA_v1';
+var RESTAU_CACHE_SEC  = 300; // 5 min
+
+function restauCell_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  if (v instanceof Date) return null;
+  var s = String(v).trim();
+  if (!s || s.charAt(0) === '#') return null;
+  return s;
+}
+
+function readRestau_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID_2026);
+  var sh = ss.getSheetByName(RESTAU_SHEET);
+  if (!sh) return { error: 'Feuille "' + RESTAU_SHEET + '" introuvable dans Reporting Region Centre 2026.' };
+
+  var last = sh.getLastRow();
+  var out = { rows: [], jours: [31, 30, 31], annee: 2026, updated: '' };
+  if (last < 5) return out;
+
+  var head = sh.getRange(3, 6, 1, 3).getValues()[0];
+  for (var k = 0; k < 3; k++) { if (typeof head[k] === 'number' && head[k] > 0) out.jours[k] = head[k]; }
+
+  try {
+    var lien = ss.getSheetByName(RESTAU_LIEN_SHEET);
+    if (lien) { var y = lien.getRange('C3').getValue(); if (typeof y === 'number' && y > 2000) out.annee = y; }
+  } catch (e) {}
+
+  var data = sh.getRange(5, 1, last - 4, 9).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var r = data[i];
+    var ent = String(r[0] || '').trim();
+    if (!ent) continue;
+    out.rows.push({
+      e: ent,
+      s: String(r[2] || '').trim(),
+      i: String(r[3] || '').trim(),
+      u: String(r[4] || '').trim(),
+      v: [restauCell_(r[5]), restauCell_(r[6]), restauCell_(r[7])]
+    });
+  }
+  out.updated = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+  return out;
+}
+
+function getRestauData(forceRefresh) {
+  try {
+    var user = getUserContext();
+    if (!user.hasAccess) return { error: 'Accès refusé.' };
+
+    var cache = CacheService.getScriptCache();
+    var payload = null;
+    if (!forceRefresh) {
+      var s = cacheGetChunked_(cache, RESTAU_CACHE_KEY);
+      if (s) { try { payload = JSON.parse(s); payload.fromCache = true; } catch (e) { payload = null; } }
+    }
+    if (!payload) {
+      payload = readRestau_();
+      if (payload.error) return payload;
+      try { cachePutChunked_(cache, RESTAU_CACHE_KEY, JSON.stringify(payload), RESTAU_CACHE_SEC); } catch (e) { Logger.log('Cache restau: ' + e.message); }
+      payload.fromCache = false;
+    }
+
+    // SÉCURITÉ : filtrage appliqué juste avant l'envoi, jamais dans le cache
+    var rows = (payload.rows || []).filter(function (r) { return entityMatchesUser_(r.e, user.entity); });
+    return {
+      rows: rows,
+      jours: payload.jours,
+      annee: payload.annee,
+      updated: payload.updated,
+      today: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      fromCache: payload.fromCache,
+      userEntity: user.entity
+    };
+  } catch (e) {
+    Logger.log('getRestauData error: ' + e.message);
+    return { error: e.message };
+  }
+}
+
+function clearRestauCache() {
+  var cache = CacheService.getScriptCache();
+  var n = parseInt(cache.get(RESTAU_CACHE_KEY + '_meta') || '0', 10);
+  var keys = [RESTAU_CACHE_KEY + '_meta'];
+  for (var i = 0; i < n; i++) keys.push(RESTAU_CACHE_KEY + '_' + i);
+  cache.removeAll(keys);
+  return 'Cache restauration vidé.';
+}

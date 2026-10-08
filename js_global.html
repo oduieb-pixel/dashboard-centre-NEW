@@ -826,6 +826,14 @@ if (updateStatusEl) {
       });
   }
 
+function setSelectIfOption(sel, val){
+  if(!sel) return false;
+  for(var i=0;i<sel.options.length;i++){
+    if(sel.options[i].value===val){ sel.value=val; return true; }
+  }
+  return false;
+}
+
 function syncFilters(src) {
       const he = document.getElementById('entite');
       const ht = document.getElementById('trimestre');
@@ -866,6 +874,10 @@ function syncFilters(src) {
       const ae = document.getElementById('achatFilterSite');
       const aa = document.getElementById('achatFilterAnnee');
       const am = document.getElementById('achatFilterMois');
+
+      // AJOUT POUR LE MODULE HOSPITALISATION
+      const hspe = document.getElementById('hospFilterEntite');
+      const hspm = document.getElementById('hospFilterMois');
       
       if(src === 'entite' || src === 'trimestre' || src === 'mois' || src === 'annee') { 
           if(le && he) le.value = he.value; 
@@ -903,6 +915,10 @@ function syncFilters(src) {
           if(ae && he) { ae.value = he.value; if(ae.onchange) ae.onchange(); }
           if(aa && ha) { aa.value = ha.value; if(aa.onchange) aa.onchange(); }
           if(am && hm) { am.value = hm.value; if(am.onchange) am.onchange(); }
+
+          // SYNCHRONISATION HOSPITALISATION
+          if(hspe && he) { if(setSelectIfOption(hspe, he.value) && hspe.onchange) hspe.onchange(); }
+          if(hspm && hm) { if(setSelectIfOption(hspm, hm.value) && hspm.onchange) hspm.onchange(); }
           if(ht) { 
               if (typeof selectedTrims !== 'undefined') {
                   selectedTrims = ht.value ? [ht.value] : [];
@@ -928,6 +944,7 @@ function syncFilters(src) {
           else if (at.id === 'view-flash' && typeof drawCharts === "function") drawCharts(); 
           else if (at.id === 'view-rh' && typeof drawCharts === "function") drawCharts();
           else if (at.id === 'view-achat' && typeof updateAchatView === "function") updateAchatView();
+          else if (at.id === 'view-hospitalisation' && typeof applyHospitFilters === "function") applyHospitFilters();
       }
   }
 
