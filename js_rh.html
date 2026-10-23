@@ -181,7 +181,15 @@ function lastSaisiMonth_(serie) {
 }
 
 // ===================== INIT =====================
-function enterRhMode_() { initRhData_(); }
+function enterRhMode_() { if (window.__rhInit) return; window.__rhInit = true; initRhData_(); }
+function prefetchRhMonths_() {
+  var ent = RH_STATE.entite || "ALL", annee = RH_STATE.annee || "";
+  filteredMonths_().slice().reverse().forEach(function(m){
+    var key = ent + "|" + annee + "|" + m;
+    if (RH_STATE.globalCacheByMonth[key]) return;
+    google.script.run.withSuccessHandler(function(res){ RH_STATE.globalCacheByMonth[key] = res; }).apiRH({ entite: ent, annee: annee, mois: m });
+  });
+}
 
 function initRhData_() {
   var entEl = document.getElementById("rhEntite");
@@ -237,6 +245,7 @@ function refreshAll_() {
   loadGlobalForCurrentMonth_();
   loadMasseSerie_();
   loadCongesSerie_();
+  setTimeout(prefetchRhMonths_, 2000);
 }
 
 function refMonth_() {
@@ -265,10 +274,13 @@ function loadGlobalForCurrentMonth_() {
 }
 
 function loadMasseSerie_() {
+  var mk = (RH_STATE.entite || "ALL") + "|" + (RH_STATE.annee || "");
+  RH_STATE.masseCache = RH_STATE.masseCache || {};
+  if (RH_STATE.masseCache[mk]) { RH_STATE.masseSerie = RH_STATE.masseCache[mk]; applyMasseFilter_(); return; }
   showMasseSkeleton_();
   google.script.run
     .withSuccessHandler(function(res) {
-      RH_STATE.masseSerie = res;
+      RH_STATE.masseSerie = res; RH_STATE.masseCache[mk] = res;
       applyMasseFilter_();
     })
     .withFailureHandler(function(err) { console.error("apiRHMasse error:", err); hideMasseSkeleton_(); })
@@ -276,10 +288,13 @@ function loadMasseSerie_() {
 }
 
 function loadCongesSerie_() {
+  var ck = RH_STATE.entite || "ALL";
+  RH_STATE.congesCache = RH_STATE.congesCache || {};
+  if (RH_STATE.congesCache[ck]) { RH_STATE.congesSerie = RH_STATE.congesCache[ck]; applyCongesFilter_(); return; }
   showCongesSkeleton_();
   google.script.run
     .withSuccessHandler(function(res){
-      RH_STATE.congesSerie = res;
+      RH_STATE.congesSerie = res; RH_STATE.congesCache[ck] = res;
       applyCongesFilter_();
     })
     .withFailureHandler(function(err){ console.error("apiRHConges error:", err); hideCongesSkeleton_(); })
@@ -954,7 +969,7 @@ window.setRhTab = function(tab) {
   var orig = window.switchTab;
   window.switchTab = function(tabId){ if (typeof orig === "function") orig(tabId); if (tabId === "rh") enterRhMode_(); };
   document.addEventListener("DOMContentLoaded", function(){
-    if (document.getElementById("rhEntite")) { setTimeout(function(){ enterRhMode_(); }, 250); }
+    /* RH chargé au premier clic sur l'onglet */
   });
 })();
 </script>

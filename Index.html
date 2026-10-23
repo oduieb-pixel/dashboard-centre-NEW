@@ -6,13 +6,15 @@
     <meta name="theme-color" content="#0f172a">
     <title>DASHBOARD - REGION CENTRE</title>
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script defer src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     
@@ -446,7 +448,6 @@
           <button class="slim-nav-item" onclick="slimSwitchTab('rh', this)" title="Ressources Humaines"><i class="fas fa-users"></i><span>RH</span></button>
           <button class="slim-nav-item" onclick="slimSwitchTab('achat', this)" title="Gestion des Achats"><i class="fas fa-shopping-cart"></i><span>Achats</span></button>
           <button class="slim-nav-item" onclick="slimSwitchTab('hospitalisation', this)" title="Suivi Hospitalisation"><i class="fas fa-hospital"></i><span>Hospit</span></button>
-          <button class="slim-nav-item" onclick="slimSwitchTab('restauration', this)" title="Suivi Restauration"><i class="fas fa-utensils"></i><span>Resto</span></button>
         </div>
         <div class="slim-bottom">
           <img id="connectedUserPhoto" class="slim-avatar" src="" alt="Profil">
@@ -529,7 +530,6 @@
             <?!= include('part_rh'); ?>
             <?!= include('part_achat'); ?>
             <?!= include('part_hospitalisation'); ?>
-            <?!= include('part_restauration'); ?>
           </div>
         </div>
       </div>
@@ -578,7 +578,6 @@
     <?!= include('js_rh'); ?>
     <?!= include('js_achat'); ?>
 <?!= include('js_hospitalisation'); ?>
-<?!= include('js_restauration'); ?>
 
     <script>
     /* ============================================ */
@@ -596,7 +595,6 @@
       'depenses': 'Dépenses Caisses', 'honoraires': 'Honoraires Médecins',
       'rh': 'Ressources Humaines', 
       'hospitalisation': 'Suivi Hospitalisation',
-      'restauration': 'Suivi Restauration',
     };
 
     /* ============================================ */
@@ -838,12 +836,9 @@
       } else if (tabName === 'recouvrement') {
         if (typeof switchTab === 'function') switchTab('recouvrement');
         setTimeout(function() { if (typeof switchFamily === 'function') switchFamily('Recouvrement', 'Dossiers non réglés', document.querySelector('.nav-sub-btn')); }, 300);
-      } else if (tabName === 'restauration') {
-        if (typeof switchTab === 'function') switchTab(tabName);
-        if (typeof loadRestauData === 'function') loadRestauData();
       } else if (tabName === 'hospitalisation') {
         if (typeof switchTab === 'function') switchTab(tabName);
-        if (typeof loadHospitData === 'function') loadHospitData();
+        if (typeof loadHospitData === 'function' && !window.__hospLoaded) { window.__hospLoaded = true; loadHospitData(); }
       } else {
         if (typeof switchTab === 'function') switchTab(tabName);
       }

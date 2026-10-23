@@ -19,6 +19,142 @@ const RH_SPREADSHEET_ID = "16PgnPwy3KBH-Iwylos7v-xFECINk3z0sCWNwQ1hvg60";
 const ENTITES_REGION = ["CSS", "CIOB", "CIMO", "HIIN", "HPB", "CIK"];
 
 // =======================================================================
+// CACHE ACCELERATEUR
+// Les volets lisent leurs données dans CacheService (compressées) au lieu
+// de relire les Google Sheets à chaque ouverture. Le cache est invalidé
+// automatiquement à chaque import/enregistrement depuis le dashboard, par
+// le bouton Actualiser, et reconstruit toutes les heures par fastCacheWarm.
+// =======================================================================
+var FAST_TTL = 21600;        // 6 h (maximum CacheService)
+var FAST_CHUNK = 90000;      // < 100 Ko par clé
+var FAST_VER_FORCE_ = null;  // utilisé uniquement par fastCacheWarm
+var FAST_CTX_FORCE_ = null;  // utilisé uniquement par fastCacheWarm
+
+function fastVer_() {
+  if (FAST_VER_FORCE_) return FAST_VER_FORCE_;
+  if (!fastVer_.v) fastVer_.v = PropertiesService.getScriptProperties().getProperty('FAST_VER') || '1';
+  return fastVer_.v;
+}
+
+function fastGet_(key) {
+  var cache = CacheService.getScriptCache();
+  var head = cache.get(key);
+  if (!head) return null;
+  var n = parseInt(head, 10), keys = [];
+  for (var i = 0; i < n; i++) keys.push(key + '#' + i);
+  var got = cache.getAll(keys), parts = [];
+  for (var j = 0; j < n; j++) {
+    var part = got[keys[j]];
+    if (part == null) return null;
+    parts.push(part);
+  }
+  var blob = Utilities.newBlob(Utilities.base64Decode(parts.join('')), 'application/x-gzip');
+  return JSON.parse(Utilities.ungzip(blob).getDataAsString());
+}
+
+function fastPut_(key, value) {
+  var json = JSON.stringify(value);
+  var b64 = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(json, 'application/json')).getBytes());
+  var n = Math.ceil(b64.length / FAST_CHUNK) || 1;
+  if (n > 250) return;
+  var obj = {};
+  for (var i = 0; i < n; i++) obj[key + '#' + i] = b64.substr(i * FAST_CHUNK, FAST_CHUNK);
+  obj[key] = String(n);
+  CacheService.getScriptCache().putAll(obj, FAST_TTL);
+}
+
+function fastCached_(name, builder) {
+  var key = 'FC|' + fastVer_() + '|' + name;
+  try { var hit = fastGet_(key); if (hit !== null) return hit; } catch (e) {}
+  var val = builder();
+  if (val && val.error) return val;
+  try { fastPut_(key, val); } catch (e) { Logger.log('Cache ' + name + ' : ' + e.message); }
+  return val;
+}
+
+function fastCacheBump_() {
+  PropertiesService.getScriptProperties().setProperty('FAST_VER', String(Date.now()));
+  fastVer_.v = null;
+  try {
+    var c = CacheService.getScriptCache();
+    c.removeAll([RH_CACHE_KEY, RH_CACHE_KEY + '_N']);
+  } catch (e) {}
+}
+
+function fastAfterWrite_(fn, args) {
+  try { return fn.apply(null, args); } finally { try { fastCacheBump_(); } catch (e) {} }
+}
+
+// Appelé par le bouton Actualiser
+function fastCacheRefresh() { fastCacheBump_(); return 'ok'; }
+
+// Préchauffage : reconstruit tout le cache sous une nouvelle version, puis bascule.
+// Lancé toutes les heures (6h-22h) par le déclencheur créé avec installFastCacheTrigger.
+function fastCacheWarm() {
+  var h = new Date().getHours();
+  if (h < 6 || h > 22) return 'nuit';
+  var t0 = Date.now();
+  var props = PropertiesService.getScriptProperties();
+  var oldVer = props.getProperty('FAST_VER') || '1';
+  var newVer = String(Date.now());
+  var run = function (fn) { try { fn(); } catch (e) { Logger.log('Warm : ' + e.message); } };
+  FAST_VER_FORCE_ = newVer;
+  try {
+    FAST_CTX_FORCE_ = { email: 'warm', hasAccess: true, role: 'ADMIN', entity: 'ALL', poste: '', photo: '', modules: 'ALL' };
+    run(getDashboardData); run(getExpensesDashboardData); run(getDelaisData);
+    run(getRecouvFocusData); run(getExpeditionData); run(getSuiviRetoursData);
+    run(getObjRealDashboardData); run(getNonSoldesData); run(getAchatData);
+    run(function () { getDetailsOrganismeData('EXP'); }); run(function () { getDetailsOrganismeData('REC'); });
+    run(getHonorairesData); run(getHospitData);
+    ENTITES_REGION.forEach(function (e) {
+      if (Date.now() - t0 > 240000) return;
+      FAST_CTX_FORCE_ = { email: 'warm', hasAccess: true, role: 'VIEWER_ENTITY', entity: e, poste: '', photo: '', modules: 'ALL' };
+      run(getHonorairesData); run(getHospitData);
+    });
+  } finally {
+    FAST_CTX_FORCE_ = null;
+    FAST_VER_FORCE_ = null;
+  }
+  // Ne bascule que si aucun import n'a eu lieu pendant le préchauffage
+  if ((props.getProperty('FAST_VER') || '1') === oldVer) props.setProperty('FAST_VER', newVer);
+  fastVer_.v = null;
+  run(function () { getRHRawData_(true); });
+  return 'ok ' + Math.round((Date.now() - t0) / 1000) + ' s';
+}
+
+function rhCached_(nom, fn, p) {
+  return fastCached_('rh|' + nom + '|' + getUserContext().entity + '|' + JSON.stringify(p || {}), function () { return fn(p); });
+}
+function apiRH(p) { return rhCached_('g', apiRH_src_, p); }
+function apiRHMasse(p) { return rhCached_('m', apiRHMasse_src_, p); }
+function apiRHConges(p) { return rhCached_('c', apiRHConges_src_, p); }
+function apiRHHistory(p) { return rhCached_('h', apiRHHistory_src_, p); }
+
+// A lancer UNE fois depuis l'éditeur Apps Script
+function installFastCacheTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'fastCacheWarm') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('fastCacheWarm').timeBased().everyHours(1).create();
+  return fastCacheWarm();
+}
+
+// Enregistrements / imports : le cache est invalidé après chaque écriture
+function clientNormalizeData()    { return fastAfterWrite_(clientNormalizeData_w_, arguments); }
+function saveExpensesData()       { return fastAfterWrite_(saveExpensesData_w_, arguments); }
+function saveRecouvFocusData()    { return fastAfterWrite_(saveRecouvFocusData_w_, arguments); }
+function saveExpeditionData()     { return fastAfterWrite_(saveExpeditionData_w_, arguments); }
+function importObjRealData()      { return fastAfterWrite_(importObjRealData_w_, arguments); }
+function clearHonorairesFile()    { return fastAfterWrite_(clearHonorairesFile_w_, arguments); }
+function saveHonorairesBatch()    { return fastAfterWrite_(saveHonorairesBatch_w_, arguments); }
+function consoliderHonoraires()   { return fastAfterWrite_(consoliderHonoraires_w_, arguments); }
+function saveNonSoldesData()      { return fastAfterWrite_(saveNonSoldesData_w_, arguments); }
+function importDetailsOrganisme() { return fastAfterWrite_(importDetailsOrganisme_w_, arguments); }
+function importHospitFromSheet()  { return fastAfterWrite_(importHospitFromSheet_w_, arguments); }
+function saveHospitChunk()        { return fastAfterWrite_(saveHospitChunk_w_, arguments); }
+function clearHospitData()        { return fastAfterWrite_(clearHospitData_w_, arguments); }
+
+// =======================================================================
 // 1. CONFIGURATION ET MENU
 // =======================================================================
 
@@ -59,7 +195,8 @@ function onOpen() {
 function getDashboardData() {
   const user = getUserContext();
   const userEntity = user.entity;
-  const extra = getExtraData();
+  const base = fastCached_('flash', function() { return { norm: getNormalizedData(), extra: getExtraData() }; });
+  const extra = base.extra;
 
   const capacityFiltered = {};
   Object.keys(extra.capacity).forEach(function(k) {
@@ -68,7 +205,7 @@ function getDashboardData() {
   });
 
   const rawData = { 
-    normalizedData: filterRowsByEntity_(getNormalizedData(), 0, userEntity),
+    normalizedData: filterRowsByEntity_(base.norm, 0, userEntity),
     contactData: filterKeyedByEntity_(extra.contact, userEntity),
     caData: filterKeyedByEntity_(extra.ca, userEntity),
     capacity: capacityFiltered
@@ -297,7 +434,7 @@ function getNormalizedData() {
   return sheet.getDataRange().getValues(); 
 }
 
-function clientNormalizeData() { 
+function clientNormalizeData_w_() { 
   try { 
     normalizeData(); 
     return "Mise à jour Flash réussie !"; 
@@ -310,7 +447,7 @@ function clientNormalizeData() {
 // 3. MODULE DÉPENSES CAISSES
 // =======================================================================
 
-function saveExpensesData(cleanData) {
+function saveExpensesData_w_(cleanData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("DEPENSES");
   const headers = ["Entité", "Jour", "Mois", "Année", "Bénéficiaire", "Montant (MAD)", "Nature", "Catégorie", "Ordre"];
@@ -355,14 +492,13 @@ function saveExpensesData(cleanData) {
 
 function getExpensesDashboardData() {
   const user = getUserContext();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("DEPENSES");
-  const lastUpdate = PropertiesService.getScriptProperties().getProperty('LAST_DEPENSE_UPDATE') || "--/--/----";
-  
-  if (!sheet) return { data: [], lastUpdate: lastUpdate }; 
-  
-  const rawData = sheet.getDataRange().getValues();
-  return { data: filterRowsByEntity_(rawData, 0, user.entity), lastUpdate: lastUpdate };
+  const base = fastCached_('depenses', function() {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("DEPENSES");
+    const lastUpdate = PropertiesService.getScriptProperties().getProperty('LAST_DEPENSE_UPDATE') || "--/--/----";
+    if (!sheet) return { data: [], lastUpdate: lastUpdate };
+    return { data: sheet.getDataRange().getValues(), lastUpdate: lastUpdate };
+  });
+  return { data: filterRowsByEntity_(base.data, 0, user.entity), lastUpdate: base.lastUpdate };
 }
 
 // =======================================================================
@@ -370,6 +506,10 @@ function getExpensesDashboardData() {
 // =======================================================================
 
 function getDelaisData() {
+  return fastCached_('delais', getDelaisData_src_);
+}
+
+function getDelaisData_src_() {
   try {
     const ss = SpreadsheetApp.openById(REC_EXP_SOURCE_ID);
     const sheet = ss.getSheetByName("Délais Obj Rec");
@@ -383,7 +523,7 @@ function getDelaisData() {
   }
 }
 
-function saveRecouvFocusData(cleanData) {
+function saveRecouvFocusData_w_(cleanData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("RECOUV_FOCUS");
   const headers = [
@@ -438,28 +578,28 @@ function saveRecouvFocusData(cleanData) {
 
 function getRecouvFocusData() {
   const user = getUserContext();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let lastUpdate = "--/--/----";
-  try {
-    const prop = PropertiesService.getScriptProperties().getProperty('LAST_RECOUV_UPDATE');
-    if (prop) lastUpdate = prop;
-  } catch(e) {}
-
-  try {
-    const sheet = ss.getSheetByName("RECOUV_FOCUS");
-    if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
-    const rawData = sheet.getDataRange().getValues();
-    return { data: filterRowsByEntity_(rawData, 0, user.entity), lastUpdate: lastUpdate };
-  } catch (e) {
-    return { data: [], lastUpdate: lastUpdate };
-  }
+  const base = fastCached_('recouv', function() {
+    let lastUpdate = "--/--/----";
+    try {
+      const prop = PropertiesService.getScriptProperties().getProperty('LAST_RECOUV_UPDATE');
+      if (prop) lastUpdate = prop;
+    } catch(e) {}
+    try {
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("RECOUV_FOCUS");
+      if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
+      return { data: sheet.getDataRange().getValues(), lastUpdate: lastUpdate };
+    } catch (e) {
+      return { data: [], lastUpdate: lastUpdate };
+    }
+  });
+  return { data: filterRowsByEntity_(base.data, 0, user.entity), lastUpdate: base.lastUpdate };
 }
 
 // =======================================================================
 // 5. MODULE EXPEDITION
 // =======================================================================
 
-function saveExpeditionData(cleanData) {
+function saveExpeditionData_w_(cleanData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("EXPEDITION_FOCUS");
   const headers = [
@@ -514,17 +654,16 @@ function saveExpeditionData(cleanData) {
 
 function getExpeditionData() {
   const user = getUserContext();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let lastUpdate = "--/--/----";
-  try { 
-    lastUpdate = PropertiesService.getScriptProperties().getProperty('LAST_EXPEDITION_UPDATE') || lastUpdate;
-  } catch(e) {}
-
-  const sheet = ss.getSheetByName("EXPEDITION_FOCUS");
-  if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
-  
-  const rawData = sheet.getDataRange().getValues();
-  return { data: filterRowsByEntity_(rawData, 0, user.entity), lastUpdate: lastUpdate };
+  const base = fastCached_('exped', function() {
+    let lastUpdate = "--/--/----";
+    try {
+      lastUpdate = PropertiesService.getScriptProperties().getProperty('LAST_EXPEDITION_UPDATE') || lastUpdate;
+    } catch(e) {}
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("EXPEDITION_FOCUS");
+    if (!sheet || sheet.getLastRow() < 2) return { data: [], lastUpdate: lastUpdate };
+    return { data: sheet.getDataRange().getValues(), lastUpdate: lastUpdate };
+  });
+  return { data: filterRowsByEntity_(base.data, 0, user.entity), lastUpdate: base.lastUpdate };
 }
 
 // =======================================================================
@@ -532,6 +671,11 @@ function getExpeditionData() {
 // =======================================================================
 
 function getSuiviRetoursData() {
+  const all = fastCached_('retours', getSuiviRetoursAll_);
+  return filterObjectsByEntity_(all, 'entite', getUserContext().entity);
+}
+
+function getSuiviRetoursAll_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Configuration des colonnes par entité
@@ -604,7 +748,7 @@ function getSuiviRetoursData() {
     }
   });
 
-  return filterObjectsByEntity_(compiledData, 'entite', getUserContext().entity);
+  return compiledData;
 }
 
 function letterToColumn(letter) {
@@ -657,7 +801,7 @@ function standardizeMotif(rawVal) {
 // 7. MODULE OBJECTIF VS RÉALISATION
 // =======================================================================
 
-function importObjRealData() {
+function importObjRealData_w_() {
   const SHEET_NAME = 'RECOUVREMENT & EXPEDITION';
   const TARGET_SHEET_NAME = 'OBJ_REAL_DATA';
   try {
@@ -719,10 +863,11 @@ function importObjRealData() {
 
 function getObjRealDashboardData() {
   const user = getUserContext();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("OBJ_REAL_DATA");
-  if (!sheet) return [];
-  const rawData = sheet.getDataRange().getValues();
+  const rawData = fastCached_('objreal', function() {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("OBJ_REAL_DATA");
+    if (!sheet) return [];
+    return sheet.getDataRange().getValues();
+  });
   return filterRowsByEntity_(rawData, 4, user.entity);
 }
 
@@ -730,7 +875,7 @@ function getObjRealDashboardData() {
 // 8. MODULE HONORAIRES MEDECINS
 // =======================================================================
 
-function clearHonorairesFile(entity, year) {
+function clearHonorairesFile_w_(entity, year) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let indexSheet = ss.getSheetByName("DB_INDEX");
   if (!indexSheet) return "Index introuvable";
@@ -759,7 +904,7 @@ function clearHonorairesFile(entity, year) {
   return "NOT_FOUND";
 }
 
-function saveHonorairesBatch(data, entity, year) {
+function saveHonorairesBatch_w_(data, entity, year) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let indexSheet = ss.getSheetByName("DB_INDEX");
   if (!indexSheet) {
@@ -829,7 +974,7 @@ function onOpen() {
 // =======================================================================
 
 // 1. Nouvelle fonction qui fusionne tout en arrière-plan
-function consoliderHonoraires() {
+function consoliderHonoraires_w_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const indexSheet = ss.getSheetByName("DB_INDEX");
   if (!indexSheet || indexSheet.getLastRow() < 2) return "Aucune archive trouvée";
@@ -878,6 +1023,49 @@ function consoliderHonoraires() {
 
 // 2. Fonction qui lit les données DIRECTEMENT depuis les fichiers sans les stocker dans le tableur principal
 function getHonorairesData() {
+  return fastCached_('hono|' + getUserContext().entity, getHonorairesData_src_);
+}
+
+function getHonorairesPacked() {
+  return fastCached_('honoP|' + getUserContext().entity, function () {
+    var r = getHonorairesData();
+    var rows = (r.data || []).slice(1).map(function (row) {
+      return row.map(function (v) {
+        if (v instanceof Date) return v.toISOString();
+        return String(v === null || v === undefined ? '' : v).replace(/[\t\n\r]/g, ' ');
+      }).join('\t');
+    });
+    return { packed: rows.join('\n'), lastUpdate: r.lastUpdate };
+  });
+}
+
+function getHonorairesPacked() {
+  return fastCached_('honoP|' + getUserContext().entity, function () {
+    var r = getHonorairesData();
+    var rows = (r.data || []).slice(1).map(function (row) {
+      return row.map(function (v) {
+        if (v instanceof Date) return v.toISOString();
+        return String(v === null || v === undefined ? '' : v).replace(/[\t\n\r]/g, ' ');
+      }).join('\t');
+    });
+    return { packed: rows.join('\n'), lastUpdate: r.lastUpdate };
+  });
+}
+
+function getHonorairesPacked() {
+  return fastCached_('honoP|' + getUserContext().entity, function () {
+    var r = getHonorairesData();
+    var rows = (r.data || []).slice(1).map(function (row) {
+      return row.map(function (v) {
+        if (v instanceof Date) return v.toISOString();
+        return String(v === null || v === undefined ? '' : v).replace(/[\t\n\r]/g, ' ');
+      }).join('\t');
+    });
+    return { packed: rows.join('\n'), lastUpdate: r.lastUpdate };
+  });
+}
+
+function getHonorairesData_src_() {
   const user = getUserContext();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const indexSheet = ss.getSheetByName("DB_INDEX");
@@ -948,7 +1136,7 @@ function getHonorairesData() {
 // 9. MODULE DOSSIERS NON SOLDÉS
 // =======================================================================
 
-function saveNonSoldesData(cleanData) {
+function saveNonSoldesData_w_(cleanData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("NON_SOLDE_FOCUS");
   
@@ -997,6 +1185,19 @@ function saveNonSoldesData(cleanData) {
 
 function getNonSoldesData() {
   const user = getUserContext();
+  const base = fastCached_('nonsoldes', function() {
+    const r = getNonSoldesData_src_({ entity: 'ALL' });
+    return { raw: r.data, multi: r.multiEntityPatients, insolv: r.insolvablesRegion, lastUpdate: r.lastUpdate };
+  });
+  return {
+    data: filterRowsByEntity_(base.raw, 0, user.entity),
+    multiEntityPatients: base.multi,
+    insolvablesRegion: user.entity === 'ALL' ? base.insolv : [],
+    lastUpdate: base.lastUpdate
+  };
+}
+
+function getNonSoldesData_src_(user) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let lastUpdate = "--/--/----";
   try { 
@@ -1098,7 +1299,7 @@ function normalizeMoisTout_(v) {
 // CACHE DONNÉES RH (fichier externe -> lecture coûteuse)
 // =========================
 const RH_CACHE_KEY = "RH_RAW_DATA_V1";
-const RH_CACHE_TTL = 360; // secondes (6 min)
+const RH_CACHE_TTL = 21600; // 6 h, rafraîchi par fastCacheWarm et Actualiser
 
 function getRHRawData_(forceRefresh) {
   const cache = CacheService.getScriptCache();
@@ -1180,7 +1381,7 @@ function apiRHRefreshCache() {
    API RH – VUE GLOBALE
    ========================= */
 
-function apiRH(params) {
+function apiRH_src_(params) {
   const ss = SpreadsheetApp.openById(RH_SPREADSHEET_ID);
 
   const entParamRaw = (params && params.entite) ? params.entite : "ALL";
@@ -1256,7 +1457,7 @@ const KPI = raw.KPI, GENRE = raw.GENRE, AGE = raw.AGE, MOUV = raw.MOUV,
 }
 
 // ---------- HISTORIQUE (modal courbe) ----------
-function apiRHHistory(params) {
+function apiRHHistory_src_(params) {
   const ss = SpreadsheetApp.openById(RH_SPREADSHEET_ID);
 
   const ent = normalizeTout_((params && params.entite) ? params.entite : "ALL");
@@ -1337,7 +1538,7 @@ function apiRHHistory(params) {
    API RH – MASSE SALARIALE & RUBRIQUES
    ========================= */
 
-function apiRHMasse(params) {
+function apiRHMasse_src_(params) {
   const raw = getRHRawDataSafe_(params && params.forceRefresh);
 
   const entParamRaw = (params && params.entite) ? params.entite : "ALL";
@@ -1456,7 +1657,7 @@ function apiRHMasse(params) {
    API RH – PROVISION CONGES PAYES (page dédiée)
    ========================= */
 
-function apiRHConges(params) {
+function apiRHConges_src_(params) {
   const raw = getRHRawDataSafe_(params && params.forceRefresh);
 
   const entParamRaw = (params && params.entite) ? params.entite : "ALL";
@@ -1817,7 +2018,7 @@ function mapAgeKey_(label) {
 // 11. IMPORT DÉTAIL (REC & EXP)
 // =======================================================================
 
-function importDetailsOrganisme() {
+function importDetailsOrganisme_w_() {
   try {
     const sourceSS = SpreadsheetApp.openById(REC_EXP_SOURCE_ID);
     const localSS = SpreadsheetApp.getActiveSpreadsheet();
@@ -1936,6 +2137,11 @@ function importDetailsOrganisme() {
 }
 
 function getDetailsOrganismeData(type) {
+  const t = (type === 'EXP') ? 'EXP' : 'REC';
+  return fastCached_('detail|' + t, function() { return getDetailsOrganismeData_src_(t); });
+}
+
+function getDetailsOrganismeData_src_(type) {
   const sheetName = (type === 'EXP') ? 'DETAIL EXP' : 'DETAIL REC';
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
@@ -1988,100 +2194,6 @@ function incrementAppVersion() {
  *   - Ligne 2 : en-têtes de COLONNES réels (Demande, Site, Statut DA...)
  *   - Lignes 3+ : données
  */
-/**
- * MODIFICATION MINIMALE de getAchatData() existant
- * Ajouter UNIQUEMENT les lignes marquées // ← NOUVEAU
- * Le reste de ta fonction reste identique
- */
-function getAchatData() {
-  const result = {
-    data: [],
-    headers: [],
-    budget: [],
-    budgetHeaders: [],
-    consoN1: [],          // ← NOUVEAU
-    lastUpdate: "--/--/----"
-  };
-  
-  try {
-    const ss = SpreadsheetApp.openById(MAIN_SPREADSHEET_ID);
-    
-    // --- BDD_CND_APP --- (ton code existant, ne change pas)
-    const sheetAchat = ss.getSheetByName("BDD_CND_APP");
-    if (sheetAchat) {
-      const lastRow = sheetAchat.getLastRow();
-      const lastCol = sheetAchat.getLastColumn();
-      if (lastRow >= 3 && lastCol >= 1) {
-        const rawHeaders = sheetAchat.getRange(2, 1, 1, lastCol).getValues()[0];
-        const rawData    = sheetAchat.getRange(3, 1, lastRow - 2, lastCol).getValues();
-        result.headers = rawHeaders.map(h => String(h || ""));
-        result.data = rawData.map(row => row.map(cell => {
-          if (cell instanceof Date) {
-            const d  = cell.getDate().toString().padStart(2, '0');
-            const m  = (cell.getMonth() + 1).toString().padStart(2, '0');
-            const y  = cell.getFullYear();
-            const h  = cell.getHours().toString().padStart(2, '0');
-            const mn = cell.getMinutes().toString().padStart(2, '0');
-            return `${d}/${m}/${y} ${h}:${mn}`;
-          }
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        }));
-      }
-    }
-    
-    // --- Index_buget --- (ton code existant, ne change pas)
-    const sheetBudget = ss.getSheetByName("Index_buget");
-    if (sheetBudget) {
-      const lastRowB = sheetBudget.getLastRow();
-      const lastColB = sheetBudget.getLastColumn();
-      if (lastRowB >= 2 && lastColB >= 1) {
-        const rawHeadersB = sheetBudget.getRange(1, 1, 1, lastColB).getValues()[0];
-        const rawBudget   = sheetBudget.getRange(2, 1, lastRowB - 1, lastColB).getValues();
-        result.budgetHeaders = rawHeadersB.map(h => String(h || ""));
-        result.budget = rawBudget.map(row => row.map(cell => {
-          if (cell instanceof Date) {
-            const d = cell.getDate().toString().padStart(2, '0');
-            const m = (cell.getMonth() + 1).toString().padStart(2, '0');
-            const y = cell.getFullYear();
-            return `${d}/${m}/${y}`;
-          }
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        }));
-      }
-    }
-
-    // ← NOUVEAU : --- index_6_2025 (conso N-1, 18 colonnes) ---
-    const sheetN1 = ss.getSheetByName("index_6_2025");
-    if (sheetN1) {
-      const lastRowN1 = sheetN1.getLastRow();
-      const lastColN1 = sheetN1.getLastColumn();
-      if (lastRowN1 >= 2 && lastColN1 >= 1) {
-        const rawN1 = sheetN1
-          .getRange(2, 1, lastRowN1 - 1, Math.min(lastColN1, 18))
-          .getValues();
-        // Pas de dates dans cette feuille, mais on nettoie les null
-        result.consoN1 = rawN1.map(row => row.map(cell => {
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        }));
-      }
-      Logger.log("✅ index_6_2025 : " + result.consoN1.length + " lignes");
-    } else {
-      Logger.log("⚠️ index_6_2025 introuvable — N-1 non chargé");
-    }
-    // ← FIN NOUVEAU
-
-    const prop = PropertiesService.getScriptProperties().getProperty('LAST_ACHAT_UPDATE');
-    if (prop) result.lastUpdate = prop;
-    
-  } catch(e) {
-    Logger.log("Erreur getAchatData : " + e.message + "\n" + e.stack);
-  }
-  
-  return result;
-}
 // ════════════════════════════════════════════════════════════════════
 // ACHAT — CONSOMMATION VS BUDGET
 // À ajouter dans Code.gs
@@ -2392,270 +2504,6 @@ function getAchatConsoData(params) {
     filterOptions,
   };
 }
-/**
- * PATCH getAchatData() — Ajouter DATA_SAGE
- * 
- * INSTRUCTIONS :
- * 1. Ouvre Code.gs
- * 2. Cherche "function getAchatData()"
- * 3. Remplace TOUT le bloc (de "function getAchatData() {" jusqu'au "}" avant "function getAchatConsoData")
- * 4. Colle ce qui suit :
- */
-
-function getAchatData() {
-  const result = {
-    data: [],
-    headers: [],
-    budget: [],
-    budgetHeaders: [],
-    consoN1: [],
-    dataSage: [],     // ← NOUVEAU
-    lastUpdate: "--/--/----"
-  };
-  
-  try {
-    const ss = SpreadsheetApp.openById(MAIN_SPREADSHEET_ID);
-    
-    // --- BDD_CND_APP ---
-    const sheetAchat = ss.getSheetByName("BDD_CND_APP");
-    if (sheetAchat) {
-      const lastRow = sheetAchat.getLastRow();
-      const lastCol = sheetAchat.getLastColumn();
-      if (lastRow >= 3 && lastCol >= 1) {
-        const rawHeaders = sheetAchat.getRange(2, 1, 1, lastCol).getValues()[0];
-        const rawData    = sheetAchat.getRange(3, 1, lastRow - 2, lastCol).getValues();
-        result.headers = rawHeaders.map(h => String(h || ""));
-        result.data = rawData.map(row => row.map(cell => {
-          if (cell instanceof Date) {
-            const d  = cell.getDate().toString().padStart(2, '0');
-            const m  = (cell.getMonth() + 1).toString().padStart(2, '0');
-            const y  = cell.getFullYear();
-            const h  = cell.getHours().toString().padStart(2, '0');
-            const mn = cell.getMinutes().toString().padStart(2, '0');
-            return d + '/' + m + '/' + y + ' ' + h + ':' + mn;
-          }
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        }));
-      }
-    }
-    
-    // --- Index_buget ---
-    const sheetBudget = ss.getSheetByName("Index_buget");
-    if (sheetBudget) {
-      const lastRowB = sheetBudget.getLastRow();
-      const lastColB = sheetBudget.getLastColumn();
-      if (lastRowB >= 2 && lastColB >= 1) {
-        const rawHeadersB = sheetBudget.getRange(1, 1, 1, lastColB).getValues()[0];
-        const rawBudget   = sheetBudget.getRange(2, 1, lastRowB - 1, lastColB).getValues();
-        result.budgetHeaders = rawHeadersB.map(h => String(h || ""));
-        result.budget = rawBudget.map(row => row.map(cell => {
-          if (cell instanceof Date) {
-            const d = cell.getDate().toString().padStart(2, '0');
-            const m = (cell.getMonth() + 1).toString().padStart(2, '0');
-            const y = cell.getFullYear();
-            return d + '/' + m + '/' + y;
-          }
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        }));
-      }
-    }
-
-    // --- index_6_2025 (conso N-1) ---
-    const sheetN1 = ss.getSheetByName("index_6_2025");
-    if (sheetN1) {
-      const lastRowN1 = sheetN1.getLastRow();
-      const lastColN1 = sheetN1.getLastColumn();
-      if (lastRowN1 >= 2 && lastColN1 >= 1) {
-        result.consoN1 = sheetN1
-          .getRange(2, 1, lastRowN1 - 1, Math.min(lastColN1, 18))
-          .getValues()
-          .map(row => row.map(cell => (cell === null || cell === undefined) ? "" : cell));
-      }
-      Logger.log("✅ index_6_2025 : " + result.consoN1.length + " lignes");
-    }
-
-    // --- DATA_SAGE (NOUVEAU) ---
-    const sheetSage = ss.getSheetByName("DATA_SAGE");
-    if (sheetSage) {
-      const lastRowS = sheetSage.getLastRow();
-      const lastColS = sheetSage.getLastColumn();
-      if (lastRowS >= 2 && lastColS >= 1) {
-        result.dataSage = sheetSage
-          .getRange(2, 1, lastRowS - 1, Math.min(lastColS, 18))
-          .getValues()
-          .map(row => row.map(cell => {
-            if (cell instanceof Date) {
-              var d = cell.getDate().toString().padStart(2, '0');
-              var m = (cell.getMonth() + 1).toString().padStart(2, '0');
-              var y = cell.getFullYear();
-              return d + '/' + m + '/' + y;
-            }
-            if (cell === null || cell === undefined) return "";
-            return cell;
-          }));
-      }
-      Logger.log("✅ DATA_SAGE : " + result.dataSage.length + " lignes");
-    } else {
-      Logger.log("⚠️ DATA_SAGE introuvable");
-    }
-
-    const prop = PropertiesService.getScriptProperties().getProperty('LAST_ACHAT_UPDATE');
-    if (prop) result.lastUpdate = prop;
-    
-  } catch(e) {
-    Logger.log("Erreur getAchatData : " + e.message + "\n" + e.stack);
-  }
-  
-  return result;
-}
-/**
- * getAchatData v16 - AKDITAL Manager Suite
- * Lit : BDD_CND_APP, BDD_CND_APP_2025, Index_buget, index_6_2025, DATA_SAGE
- */
-function getAchatData() {
-  const result = {
-    data: [], headers: [],
-    data2025: [], headers2025: [],
-    budget: [], budgetHeaders: [],
-    consoN1: [],
-    dataSage: [],
-    lastUpdate: "--/--/----"
-  };
-
-  try {
-    const ss = SpreadsheetApp.openById(MAIN_SPREADSHEET_ID);
-
-    // Helper générique
-    function readSheet(name, headerRow, dataStartRow) {
-      const sheet = ss.getSheetByName(name);
-      if (!sheet) { Logger.log("⚠️ Feuille introuvable : " + name); return null; }
-      const lastRow = sheet.getLastRow();
-      const lastCol = sheet.getLastColumn();
-      if (lastRow < dataStartRow || lastCol < 1) return null;
-      const headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0].map(h => String(h || ""));
-      const data = sheet.getRange(dataStartRow, 1, lastRow - dataStartRow + 1, lastCol).getValues().map(row =>
-        row.map(cell => {
-          if (cell instanceof Date) {
-            const d = cell.getDate().toString().padStart(2, '0');
-            const m = (cell.getMonth() + 1).toString().padStart(2, '0');
-            const y = cell.getFullYear();
-            const h = cell.getHours().toString().padStart(2, '0');
-            const mn = cell.getMinutes().toString().padStart(2, '0');
-            return (h === '00' && mn === '00') ? `${d}/${m}/${y}` : `${d}/${m}/${y} ${h}:${mn}`;
-          }
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        })
-      );
-      Logger.log("✅ " + name + " : " + data.length + " lignes");
-      return { headers, data };
-    }
-
-    // BDD_CND_APP (headers ligne 2, data ligne 3+)
-    const bdd = readSheet("BDD_CND_APP", 2, 3);
-    if (bdd) { result.headers = bdd.headers; result.data = bdd.data; }
-
-    // BDD_CND_APP_2025 (même structure que BDD_CND_APP)
-    const bdd25 = readSheet("BDD_CND_APP_2025", 2, 3);
-    if (bdd25) { result.headers2025 = bdd25.headers; result.data2025 = bdd25.data; }
-
-    // Index_buget (headers ligne 1, data ligne 2+)
-    const bud = readSheet("Index_buget", 1, 2);
-    if (bud) { result.budgetHeaders = bud.headers; result.budget = bud.data; }
-
-    // index_6_2025 (conso N-1 pivot 12 mois)
-    const n1 = readSheet("index_6_2025", 1, 2);
-    if (n1) result.consoN1 = n1.data;
-
-    // DATA_SAGE
-    const sage = readSheet("DATA_SAGE", 1, 2);
-    if (sage) result.dataSage = sage.data;
-
-    const prop = PropertiesService.getScriptProperties().getProperty('LAST_ACHAT_UPDATE');
-    if (prop) result.lastUpdate = prop;
-
-  } catch (e) {
-    Logger.log("Erreur getAchatData : " + e.message + "\n" + e.stack);
-  }
-
-  return result;
-}
-/**
- * getAchatData v17 — AKDITAL Manager Suite
- * Lit : BDD_CND_APP, BDD_CND_APP_2025, Index_buget, Index_buget_APP, index_6_2025, DATA_SAGE, Code_article
- */
-function getAchatData() {
-  var result = {
-    data: [], headers: [],
-    data2025: [], headers2025: [],
-    budget: [], budgetHeaders: [],
-    budgetApp: [],
-    consoN1: [],
-    dataSage: [],
-    codeArticle: [],
-    lastUpdate: "--/--/----"
-  };
-
-  try {
-    var ss = SpreadsheetApp.openById(MAIN_SPREADSHEET_ID);
-
-    function readSheet(name, headerRow, dataStartRow, maxCol) {
-      var sheet = ss.getSheetByName(name);
-      if (!sheet) { Logger.log("⚠️ Feuille introuvable : " + name); return null; }
-      var lastRow = sheet.getLastRow();
-      var lastCol = maxCol || sheet.getLastColumn();
-      if (lastRow < dataStartRow || lastCol < 1) return null;
-      var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0].map(function(h){return String(h || "");});
-      var data = sheet.getRange(dataStartRow, 1, lastRow - dataStartRow + 1, lastCol).getValues().map(function(row) {
-        return row.map(function(cell) {
-          if (cell instanceof Date) {
-            var d = cell.getDate().toString().padStart(2, '0');
-            var m = (cell.getMonth() + 1).toString().padStart(2, '0');
-            var y = cell.getFullYear();
-            var h = cell.getHours().toString().padStart(2, '0');
-            var mn = cell.getMinutes().toString().padStart(2, '0');
-            return (h === '00' && mn === '00') ? d+'/'+m+'/'+y : d+'/'+m+'/'+y+' '+h+':'+mn;
-          }
-          if (cell === null || cell === undefined) return "";
-          return cell;
-        });
-      });
-      Logger.log("✅ " + name + " : " + data.length + " lignes");
-      return { headers: headers, data: data };
-    }
-
-    var bdd = readSheet("BDD_CND_APP", 2, 3);
-    if (bdd) { result.headers = bdd.headers; result.data = bdd.data; }
-
-    var bdd25 = readSheet("BDD_CND_APP_2025", 2, 3);
-    if (bdd25) { result.headers2025 = bdd25.headers; result.data2025 = bdd25.data; }
-
-    var bud = readSheet("Index_buget", 1, 2);
-    if (bud) { result.budgetHeaders = bud.headers; result.budget = bud.data; }
-
-    var budApp = readSheet("Index_buget_APP", 1, 2);
-    if (budApp) result.budgetApp = budApp.data;
-
-    var n1 = readSheet("index_6_2025", 1, 2, 18);
-    if (n1) result.consoN1 = n1.data;
-
-    var sage = readSheet("DATA_SAGE", 1, 2);
-    if (sage) result.dataSage = sage.data;
-
-    var art = readSheet("Code_article", 1, 2);
-    if (art) result.codeArticle = art.data;
-
-    var prop = PropertiesService.getScriptProperties().getProperty('LAST_ACHAT_UPDATE');
-    if (prop) result.lastUpdate = prop;
-
-  } catch(e) {
-    Logger.log("Erreur getAchatData : " + e.message + "\n" + e.stack);
-  }
-
-  return result;
-}
 const SECURITY_DB_ID = '1EImVCSXRLHK6X4agSFguvctgUtiwgO519VBHZtaMod8';
 function getSecurityDb() { return SpreadsheetApp.openById(SECURITY_DB_ID); }
 
@@ -2709,16 +2557,26 @@ function filterKeyedByEntity_(obj, userEntity) {
 }
 
 function getUserContext() {
+  if (FAST_CTX_FORCE_) return FAST_CTX_FORCE_;
   var email = Session.getActiveUser().getEmail().toLowerCase();
+  if (getUserContext.memo && getUserContext.memo.email === email) return getUserContext.memo;
+  var cache = CacheService.getScriptCache(), ck = 'UCTX|' + email;
+  try { var s = cache.get(ck); if (s) { getUserContext.memo = JSON.parse(s); return getUserContext.memo; } } catch (e) {}
+  var ctx = { email:email, hasAccess:false, role:'NONE', entity:'NONE', poste:'', photo:'', modules:'NONE' };
   var data  = getSecurityDb().getSheetByName('Users').getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][2]).toLowerCase() === email)
-      return { email:email, hasAccess:true, role:data[i][3], entity:data[i][4], poste:data[i][5]||'', photo:data[i][6]||'', modules:data[i][7]||'ALL' };
+    if (String(data[i][2]).toLowerCase() === email) {
+      ctx = { email:email, hasAccess:true, role:data[i][3], entity:data[i][4], poste:data[i][5]||'', photo:data[i][6]||'', modules:data[i][7]||'ALL' };
+      break;
+    }
   }
-  return { email:email, hasAccess:false, role:'NONE', entity:'NONE', poste:'', photo:'', modules:'NONE' };
+  try { cache.put(ck, JSON.stringify(ctx), 300); } catch (e) {}
+  getUserContext.memo = ctx;
+  return ctx;
 }
 
 function verifyCustomLogin(username, password, clientIp) {
+  try { CacheService.getScriptCache().remove('UCTX|' + Session.getActiveUser().getEmail().toLowerCase()); } catch (e) {}
   var userSheet = getSecurityDb().getSheetByName('Users');
   var logSheet  = getSecurityDb().getSheetByName('Logs_ESG');
   var data = userSheet.getDataRange().getValues();
@@ -2969,47 +2827,26 @@ function calcObjAchat(rows2025){
   });
 }
 
+function buildAchatFull_(){
+  var today=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm');
+  var d2026=readBddCnd('BDD_CND_APP',     2026);
+  var d2025=readBddCnd('BDD_CND_APP_2025',2025);
+  var objectifs=calcObjAchat(d2025);
+  return {data:d2026,data2025:d2025,objectifs:objectifs,lastUpdate:today,fromCache:false};
+}
+
 function getAchatData(){
   var user = getUserContext();
   try{
-    var cache=CacheService.getScriptCache();
-    var cached=cacheGetChunked_(cache, ACHAT_CACHE_KEY);
-    if(cached){
-      try{
-        var p=JSON.parse(cached);
-        p.fromCache=true;
-        // SÉCURITÉ : le cache contient TOUTES les entités, on filtre juste avant l'envoi
-        p.data      = filterObjectsByEntity_(p.data, 'site', user.entity);
-        p.data2025  = filterObjectsByEntity_(p.data2025, 'site', user.entity);
-        p.objectifs = filterObjectsByEntity_(p.objectifs, 'site', user.entity);
-        return p;
-      }catch(e){}
-    }
-
-    var today=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm');
-    var d2026=readBddCnd('BDD_CND_APP',     2026);
-    var d2025=readBddCnd('BDD_CND_APP_2025',2025);
-    var objectifs=calcObjAchat(d2025);
-
-    var result={data:d2026,data2025:d2025,objectifs:objectifs,lastUpdate:today,fromCache:false};
-
-    try{
-      // On met en cache la version COMPLÈTE (non filtrée), pour tous les utilisateurs
-      // CORRECTION : plus de troncature à 2500 lignes (coupait les entités CIK/HPB
-      // situées en fin de feuille 2025, qui se retrouvaient vides après filtrage).
-      // On découpe le JSON en chunks à la place, sans perdre de données.
-      var json=JSON.stringify(result);
-      cachePutChunked_(cache, ACHAT_CACHE_KEY, json, ACHAT_CACHE_SEC);
-    }catch(e){Logger.log('Cache write: '+e.message);}
-
-    // SÉCURITÉ : filtrage appliqué juste avant l'envoi, jamais dans le cache
+    var p = fastCached_('achat', buildAchatFull_);
+    // SÉCURITÉ : le cache contient TOUTES les entités, on filtre juste avant l'envoi
     return {
-      data: filterObjectsByEntity_(result.data, 'site', user.entity),
-      data2025: filterObjectsByEntity_(result.data2025, 'site', user.entity),
-      objectifs: filterObjectsByEntity_(result.objectifs, 'site', user.entity),
-      lastUpdate: result.lastUpdate,
-      fromCache: result.fromCache,
-      truncated: result.truncated || false
+      data: filterObjectsByEntity_(p.data, 'site', user.entity),
+      data2025: filterObjectsByEntity_(p.data2025, 'site', user.entity),
+      objectifs: filterObjectsByEntity_(p.objectifs, 'site', user.entity),
+      lastUpdate: p.lastUpdate,
+      fromCache: false,
+      truncated: p.truncated || false
     };
   }catch(e){
     Logger.log('getAchatData error: '+e.message);
@@ -3017,7 +2854,7 @@ function getAchatData(){
   }
 }
 
-function clearAchatCache(){CacheService.getScriptCache().remove(ACHAT_CACHE_KEY);return 'Cache vidé.';}
+function clearAchatCache(){fastCacheBump_();return 'Cache vidé.';}
 // =======================================================================
 // MODULE HOSPITALISATION — BACKEND V12 (VERSION FACTURABLE)
 // Coût unitaire = (séjour + surveillance) / nuitées — médecin exclu, sans arrondi OCP
@@ -3133,7 +2970,7 @@ function getHospDB(entity){
 // -----------------------------------------------------------------------
 // IMPORT DEPUIS GOOGLE SHEET SOURCE
 // -----------------------------------------------------------------------
-function importHospitFromSheet(entity){
+function importHospitFromSheet_w_(entity){
   var sheetId=HOSPIT_SOURCE_SHEETS[entity];
   if(!sheetId)return{error:'Pas de Sheet configuré pour '+entity};
   try{
@@ -3193,7 +3030,7 @@ function importHospitFromSheet(entity){
 // -----------------------------------------------------------------------
 // SAUVEGARDE CHUNK (import fichier navigateur)
 // -----------------------------------------------------------------------
-function saveHospitChunk(chunkData,entity){
+function saveHospitChunk_w_(chunkData,entity){
   if(!chunkData||chunkData.length===0)return'empty';
   var ctx=getHospDB(entity),sh=ctx.sheet;
   sh.getRange(sh.getLastRow()+1,1,chunkData.length,chunkData[0].length).setValues(chunkData);
@@ -3202,7 +3039,7 @@ function saveHospitChunk(chunkData,entity){
   PropertiesService.getScriptProperties().setProperty('LAST_HOSPIT_UPDATE_'+entity,ts.toLocaleString('fr-FR'));
   return'ok';
 }
-function clearHospitData(entity){
+function clearHospitData_w_(entity){
   var ctx=getHospDB(entity),sh=ctx.sheet;
   if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,DB_COLS.length).clearContent();
   return'cleared';
@@ -3212,6 +3049,10 @@ function clearHospitData(entity){
 // LECTURE + CALCUL
 // -----------------------------------------------------------------------
 function getHospitData(){
+  return fastCached_('hospit|' + getUserContext().entity, getHospitData_src_);
+}
+
+function getHospitData_src_(){
   var user=getUserContext(),idx=getHospIdx(),idxData=idx.getDataRange().getValues();
   var now=new Date(),nowDK=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
 
@@ -3330,7 +3171,6 @@ function getHospitData(){
 
   return{dossiers:dossiers,filters:{annees:[2026],mois:moisDispos},lastUpdate:lastUpdate};
 }
-diagHospit()
 function diagHospit() {
   var out = [];
   var idx = getHospIdx();

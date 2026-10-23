@@ -34,7 +34,8 @@ const EXCLUDED_SPECS_IMPORT = ["ANESTHESIE-REANIMATION", "RADIOLOGIE", "RADIOLOG
 // 2. CHARGEMENT ET TRAITEMENT DES DONNÉES
 // =======================================================================
 
-function loadHonorairesData() {
+function loadHonorairesData(force) {
+    if (!force && globalHonorairesData.length) return;
     if(document.getElementById('loadingOverlay')) document.getElementById('loadingOverlay').style.display = 'flex';
     
     // Animation barre de progression
@@ -54,7 +55,7 @@ function loadHonorairesData() {
         }
     }, 200);
 
-    google.script.run.withSuccessHandler(response => {
+    const onHono = (response => {
         clearInterval(interval);
         if(progressEl) progressEl.style.width = '100%';
         if(progressTxt) progressTxt.textContent = '100%';
@@ -64,11 +65,21 @@ function loadHonorairesData() {
             if(document.getElementById('loadingOverlay')) document.getElementById('loadingOverlay').style.display = 'none';
         }, 500);
 
-        if (response && response.data) {
+        if (response && (response.packed !== undefined || response.data)) {
             safeSetText('honorairesLastUpdate', "Date d'actualisation : " + (response.lastUpdate || "--/--/----"));
-            processHonorairesData(response.data);
+            let rows = response.data;
+            if (response.packed !== undefined) {
+                rows = [[]].concat(response.packed ? response.packed.split('\n').map(l => l.split('\t')) : []);
+            }
+            processHonorairesData(rows);
         }
-    }).getHonorairesData();
+    });
+    if (!force && honoPrefetch) {
+        honoPrefetch.then(r => { if (r) onHono(r); else google.script.run.withSuccessHandler(onHono).getHonorairesPacked(); });
+    } else {
+        google.script.run.withSuccessHandler(onHono).getHonorairesPacked();
+    }
+    honoPrefetch = null;
 }
 
 function processHonorairesData(rawData) {
@@ -645,6 +656,7 @@ function renderHonoTable() {
     const clkType = (n, typeOrg, subStat) => `onclick="openHonoDetail('${n.replace(/'/g, "\\'")}', 'TYPE_DETAIL', '${typeOrg}|${subStat}')" style="cursor:pointer;"`;
     const fmt = (v) => v===0 ? '-' : formatMoney(v);
 
+    let html = '';
     rows.forEach(r => {
         let specDisplay = r.spec || "";
         let tr = `<tr onmouseenter="showTrendTooltip(event, '${r.name.replace(/'/g, "\\'")}', '${honoViewMode}', '${specDisplay.replace(/'/g, "\\'")}')" onmouseleave="hideTrendTooltip()">`;
@@ -677,8 +689,9 @@ function renderHonoTable() {
             tr += `<td ${clkType(r.name, 'REGION-DAKHLA-OUED-EDDAHAB', 'NON_SOLDE')} style="text-align:right; background:#e8f5e9;">${fmt(r.region.ns)}</td>`;
         }
         tr += `</tr>`;
-        tbody.insertAdjacentHTML('beforeend', tr);
+        html += tr;
     });
+    tbody.innerHTML = html;
 }
 
 // =======================================================================
@@ -878,7 +891,7 @@ async function handleHonorairesFileSelect(event) {
     
     google.script.run.withSuccessHandler(function(res) {
         document.getElementById('fileHonoraireDisplay').textContent = "Terminé !";
-        loadHonorairesData(); // Recharge le tableau de bord instantanément
+        loadHonorairesData(true);
     }).withFailureHandler(function(err) {
         document.getElementById('fileHonoraireDisplay').textContent = "Erreur consolidation";
     }).consoliderHonoraires();
@@ -1067,4 +1080,13 @@ window.printHonoSummaryPDF = function() { const tableHTML = document.getElementB
 window.exportHonoDetailExcel = function() { if(!currentDetailHonoData || currentDetailHonoData.length === 0) return; const exportData = currentDetailHonoData.map(d => ({ "Entité": d.entite, "Date Sortie": d.dateSortieDisplay, "Dossier": d.dossier, "Médecin": d.medecin, "Spécialité": d.specialite, "Organisme": d.organisme, "Type": d.typeOrganisme, "Montant Brut": d.mtBrut, "Statut": d.regle })); const ws = XLSX.utils.json_to_sheet(exportData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Detail_Honoraires"); XLSX.writeFile(wb, "Detail_Honoraires.xlsx"); }
 window.printHonoDetailData = function() { const content = document.getElementById('honoPrintArea').innerHTML; const title = document.getElementById('honoModalTitle').textContent; const printWindow = window.open('', '', 'height=600,width=1200'); printWindow.document.write(`<html><head><title>${title}</title><style>table{width:100%;border-collapse:collapse;font-family:sans-serif;font-size:10px;} th,td{border:1px solid #ccc;padding:5px;text-align:left;} th{background:#eee;} td:nth-child(9){text-align:right;}</style></head><body><h2>${title}</h2>${content}</body></html>`); printWindow.document.close(); setTimeout(() => { printWindow.print(); printWindow.close(); }, 500); }
 
+let honoPrefetch = null;
+function startHonoPrefetch() {
+    if (honoPrefetch || globalHonorairesData.length) return;
+    honoPrefetch = new Promise(res => google.script.run.withSuccessHandler(res).withFailureHandler(() => res(null)).getHonorairesPacked());
+}
+(function waitHono() {
+    if (typeof rawData !== 'undefined' && rawData && rawData.caData) setTimeout(startHonoPrefetch, 1500);
+    else setTimeout(waitHono, 1000);
+})();
 </script>

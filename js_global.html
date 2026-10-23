@@ -157,8 +157,7 @@
               'depenses': 'DEPENSES',
               'honoraires': 'HONORAIRES',
               'rh': 'RH',
-              'achat': 'ACHAT',
-              'restauration': 'RESTAURATION'
+              'achat': 'ACHAT'
           };
 
           // Masque les boutons de navigation principaux (sidebar desktop + barre mobile)
@@ -190,10 +189,13 @@
   //  2. GESTION CONNEXION & SÉCURITÉ (NOUVEAU)
   // =======================================================================
 
+  // Préchargement du Flash pendant la saisie du mot de passe.
+  // Les données sont filtrées côté serveur selon le compte Google connecté.
+  window.__flashPrefetch = { done: false, used: false, data: null, waiters: [] };
   document.addEventListener('DOMContentLoaded', () => {
-      // On prépare juste l'interface, pas de chargement de données ici.
-      // Le chargement se fait via attemptLogin().
-      console.log("Application prête à la connexion.");
+      const pf = window.__flashPrefetch;
+      const finish = (d) => { pf.done = true; pf.data = d; pf.waiters.splice(0).forEach(fn => fn(d)); };
+      google.script.run.withSuccessHandler(finish).withFailureHandler(() => finish(null)).getDashboardData();
   });
 
 function attemptLogin() {
@@ -656,10 +658,24 @@ window.toggleDarkMode = function() {
       document.getElementById('loadingOverlay').style.display = 'flex';
       // On passe le contexte utilisateur actuel pour revalider
       const email = currentUserContext ? currentUserContext.email : null;
-      google.script.run
+      const fetchFresh = () => google.script.run
           .withSuccessHandler(initializeDashboard) // Réutilise la fonction init standard
           .withFailureHandler(showError)
-          .getDashboardData(email); 
+          .getDashboardData(email);
+
+      // Premier affichage : on utilise le préchargement lancé à l'ouverture de la page
+      const pf = window.__flashPrefetch;
+      if (pf && !pf.used) {
+          pf.used = true;
+          const use = (d) => {
+              const c = window.currentUserContext, u = d && d.userContext;
+              const sameUser = u && (!c || (String(u.entity) === String(c.entity) && String(u.role) === String(c.role)));
+              if (d && sameUser) initializeDashboard(d); else fetchFresh();
+          };
+          if (pf.done) use(pf.data); else pf.waiters.push(use);
+          return;
+      }
+      fetchFresh();
   }
 
 window.updateData = function() { 
