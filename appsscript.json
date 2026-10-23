@@ -1,5 +1,7 @@
 {
   "timeZone": "Africa/Casablanca",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
   "dependencies": {
     "enabledAdvancedServices": [
       {
@@ -23,8 +25,6 @@
     "executeAs": "USER_DEPLOYING",
     "access": "DOMAIN"
   },
-  "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8",
   "oauthScopes": [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",

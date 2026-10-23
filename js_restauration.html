@@ -1,0 +1,679 @@
+<script>
+/**
+ * MODULE RESTAURATION · v2 CONTRÔLE DE GESTION
+ * Source : getRestauData() -> feuille BDD RESTAU (Reporting Region Centre 2026)
+ * Vision Région / entité, coût par nuitée, pont volume-consommation-prix, matrice, écarts vs référence.
+ */
+var RST = { ix:null, order:{}, jours:[31,30,31], annee:2026, today:new Date(), t:0, period:'T4', ent:'', fam:'',
+            sort1:{k:'mnt',d:-1}, sort2:{k:'mnt',d:-1}, ch:{}, userEntity:'ALL', ents:[] };
+var RST_MOIS  = ['Octobre','Novembre','Décembre'];
+var RST_CITY  = { CSS:'Safi', HIIN:'Marrakech', CIMO:'Essaouira', HPB:'Béni Mellal', CIK:'Khouribga', CIOB:'Benguerir' };
+var RST_COLOR = { CSS:'#6366f1', HIIN:'#0ea5e9', CIMO:'#8b5cf6', HPB:'#10b981', CIK:'#f59e0b', CIOB:'#64748b' };
+var RST_ENT_ORDER = ['CSS','HIIN','CIMO','HPB','CIK','CIOB'];
+var RST_FAMC  = { 'Soins critiques':'#6366f1', 'Hospitalisation':'#0ea5e9', 'Maternité':'#ec4899', 'Ambulatoire':'#f59e0b', 'Hors service':'#94a3b8' };
+var RST_FAMS  = ['Soins critiques','Hospitalisation','Maternité','Ambulatoire','Hors service'];
+var RST_GOOD = '#10b981', RST_BAD = '#ef4444', RST_NEUT = '#6366f1';
+
+/* ---------- Formats ---------- */
+function rInt(n){ return (n===null||n===undefined||isNaN(n)) ? '—' : Math.round(n).toLocaleString('fr-FR'); }
+function rDec(n,d){ return (n===null||n===undefined||isNaN(n)) ? '—' : n.toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function rPct(n){ return (n===null||n===undefined||isNaN(n)) ? '—' : Math.round(n*100) + ' %'; }
+function rSgn(n,fn){ return (n===null||n===undefined||isNaN(n)) ? '—' : (n>0?'+':(n<0?'−':'')) + fn(Math.abs(n)); }
+function rMad(n){
+  if (n===null||n===undefined||isNaN(n)) return '—';
+  var a = Math.abs(n);
+  if (a >= 1e6) return rDec(n/1e6,2) + ' M';
+  if (a >= 1e4) return rDec(n/1e3,1) + ' k';
+  return rInt(n);
+}
+function rRel(a,b){ return (a===null||b===null||a===undefined||b===undefined||!(b>0)) ? null : a/b - 1; }
+function rShort(s){
+  if (s.indexOf('Hospitalisation médico-chirurgicale')===0) return 'HMC';
+  if (s.indexOf('Séance Chimiothérapie')===0) return 'Chimio';
+  if (s==='Hôpital du jour') return 'HDJ';
+  if (s==='Irathérapie Hospit') return 'Irathérapie';
+  return s.replace('Réanimation ','Réa ');
+}
+function rFam(s){
+  if (s==='Hors service') return 'Hors service';
+  if (/^Réanimation|^USI/.test(s)) return 'Soins critiques';
+  if (s==='Maternité') return 'Maternité';
+  if (s==='Hôpital du jour' || /^Séance Chimio/.test(s)) return 'Ambulatoire';
+  return 'Hospitalisation';
+}
+function rEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function rEl(id){ return document.getElementById(id); }
+function rMedian(a){ if (!a.length) return null; a = a.slice().sort(function(x,y){ return x-y; }); var m = Math.floor(a.length/2); return a.length%2 ? a[m] : (a[m-1]+a[m])/2; }
+
+/* ---------- Chargement ---------- */
+function rstLoad(force){
+  if (!force && RST.ix && (Date.now() - RST.t) < 120000) { rstRender(); return; }
+  var btn = rEl('rstRefreshBtn'); if (btn) btn.classList.add('spin');
+  if (typeof showLoadingOverlay === 'function') showLoadingOverlay('Chargement Restauration…');
+  google.script.run
+    .withSuccessHandler(function(res){
+      if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+      if (btn) btn.classList.remove('spin');
+      rstIngest(res);
+    })
+    .withFailureHandler(function(err){
+      if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+      if (btn) btn.classList.remove('spin');
+      rstShowEmpty('Erreur de chargement : ' + (err && err.message ? err.message : err));
+    })
+    .getRestauData(!!force);
+}
+window.loadRestauData = function(){ rstLoad(false); };
+
+function rstShowEmpty(msg){
+  rEl('rstEmpty').style.display = 'block';
+  rEl('rstEmptyMsg').textContent = msg;
+  rEl('rstBody').style.display = 'none';
+}
+
+function rstKey(ind, s){
+  var n = ind.toLowerCase();
+  if (s === 'Entité') {
+    if (n.indexOf('montant contrat') === 0) return 'eMnt';
+    if (n.indexOf('montant facturé') === 0) return 'eFac';
+    if (n.indexOf('lignes en écart') === 0) return 'eLig';
+    if (n.indexOf('écart') === 0) return 'eEc';
+    return null;
+  }
+  if (n.indexOf('activité') === 0) return 'act';
+  if (n === 'repas patients hors collations') return 'rep';
+  if (n === 'collations') return 'col';
+  if (n === 'menus améliorés') return 'men';
+  if (n === 'montant contrat ht') return 'mnt';
+  if (n === 'jours saisis') return 'js';
+  if (n === 'saisi par') return 'par';
+  return null;
+}
+
+function rstIngest(res){
+  if (!res || res.error) { rstShowEmpty(res && res.error ? res.error : 'Aucune réponse du serveur.'); return; }
+  var rows = res.rows || [], ix = {}, order = {}, hasNum = false;
+  rows.forEach(function(r){
+    var k = rstKey(r.i, r.s); if (!k) return;
+    ix[r.e] = ix[r.e] || {}; order[r.e] = order[r.e] || [];
+    if (!ix[r.e][r.s]) { ix[r.e][r.s] = {}; if (r.s !== 'Entité') order[r.e].push(r.s); }
+    var t = ix[r.e][r.s]; t[k] = r.v;
+    if (k === 'act') t.unit = r.u || (/passage/i.test(r.i) ? 'Passages' : 'Nuitées');
+    if (k !== 'par' && k !== 'js') r.v.forEach(function(x){ if (typeof x === 'number') hasNum = true; });
+  });
+  RST.ix = ix; RST.order = order; RST.jours = res.jours || [31,30,31]; RST.annee = res.annee || 2026;
+  RST.userEntity = res.userEntity || 'ALL'; RST.t = Date.now();
+  var p = String(res.today || '').split('-');
+  RST.today = p.length === 3 ? new Date(+p[0], +p[1]-1, +p[2]) : new Date();
+  rEl('rstLastUpdate').textContent = "Date d'actualisation : " + (res.updated || '--') + (res.fromCache ? ' (cache)' : '');
+  if (!rows.length || !hasNum) {
+    rstShowEmpty("La feuille BDD RESTAU ne renvoie aucune valeur. Vérifiez dans « Reporting Region Centre 2026 » que les liens de LIEN RESTAU sont renseignés et que l'accès IMPORTRANGE est autorisé pour chaque fichier mensuel.");
+    return;
+  }
+  rEl('rstEmpty').style.display = 'none'; rEl('rstBody').style.display = 'block';
+  var ents = RST_ENT_ORDER.filter(function(e){ return ix[e]; });
+  Object.keys(ix).forEach(function(e){ if (ents.indexOf(e) < 0) ents.push(e); });
+  RST.ents = ents;
+  if (ents.length === 1) RST.ent = ents[0];
+  rstPills();
+  rstRender();
+}
+
+function rstPills(){
+  var h = '';
+  if (RST.ents.length > 1) h += '<button class="rst-pill' + (RST.ent === '' ? ' active' : '') + '" data-ent="">Région Centre</button>';
+  RST.ents.forEach(function(e){
+    h += '<button class="rst-pill' + (RST.ent === e ? ' active' : '') + '" data-ent="' + e + '"><span class="rst-dot" style="background:' + (RST_COLOR[e]||'#64748b') + ';margin:0"></span>' + e + ' <small>' + (RST_CITY[e]||'') + '</small></button>';
+  });
+  var box = rEl('rstPills'); box.innerHTML = h;
+  box.onclick = function(ev){
+    var b = ev.target.closest ? ev.target.closest('.rst-pill') : null; if (!b) return;
+    RST.ent = b.getAttribute('data-ent'); rstPills(); rstRender();
+  };
+}
+
+/* ---------- Filtres ---------- */
+function rstSetPeriod(p){
+  RST.period = p;
+  var bs = document.querySelectorAll('#rstSeg button');
+  for (var i = 0; i < bs.length; i++) bs[i].classList.toggle('active', bs[i].getAttribute('data-p') === p);
+  rstRender();
+}
+function rstApplyFilters(){ RST.fam = rEl('rstFilterFam').value; rstRender(); }
+function rstReset(){
+  RST.period = 'T4'; RST.fam = ''; if (RST.ents.length > 1) RST.ent = '';
+  rEl('rstFilterFam').value = ''; rEl('rstSearch').value = '';
+  var bs = document.querySelectorAll('#rstSeg button');
+  for (var i = 0; i < bs.length; i++) bs[i].classList.toggle('active', bs[i].getAttribute('data-p') === 'T4');
+  rstPills(); rstRender();
+}
+
+/* ---------- Calculs ---------- */
+function rMs(){ return RST.period === 'T4' ? [0,1,2] : [parseInt(RST.period,10)]; }
+function rSum(arr, ms){
+  if (!arr) return null;
+  var t = 0, any = false;
+  ms.forEach(function(m){ if (typeof arr[m] === 'number') { t += arr[m]; any = true; } });
+  return any ? t : null;
+}
+function rElapsed(m){
+  var start = new Date(RST.annee, 9 + m, 1);
+  var d = Math.floor((RST.today - start) / 86400000) + 1;
+  return Math.max(0, Math.min(RST.jours[m], d));
+}
+function rDays(ms){ var t = 0; ms.forEach(function(m){ t += RST.jours[m]; }); return t; }
+function rExp(ms){ var t = 0; ms.forEach(function(m){ t += rElapsed(m); }); return t; }
+function rPeriodLabel(ms){ return ms.length === 3 ? 'T4 2026' : RST_MOIS[ms[0]] + ' 2026'; }
+
+function rEnts(all){ return (all || !RST.ent) ? RST.ents : RST.ents.filter(function(e){ return e === RST.ent; }); }
+
+function rSvc(e, s, ms){
+  var t = RST.ix[e][s], exp = rExp(ms);
+  var a = { e:e, s:s, fam:rFam(s), hs:(s==='Hors service'), unit:t.unit||'', act:rSum(t.act,ms), rep:rSum(t.rep,ms), col:rSum(t.col,ms),
+            men:rSum(t.men,ms), mnt:rSum(t.mnt,ms), js:rSum(t.js,ms)||0, exp:exp };
+  a.pass = /passage/i.test(a.unit);
+  a.prest = (a.rep===null && a.col===null && a.men===null) ? null : (a.rep||0) + (a.col||0) + (a.men||0);
+  a.ratio = (a.act > 0 && a.rep !== null) ? a.rep / a.act : null;
+  a.cout  = (a.act > 0 && a.mnt > 0) ? a.mnt / a.act : null;
+  a.prestU = (a.act > 0 && a.prest !== null) ? a.prest / a.act : null;
+  a.prix  = (a.prest > 0 && a.mnt > 0) ? a.mnt / a.prest : null;
+  a.cov   = exp ? Math.min(1, a.js / exp) : 0;
+  return a;
+}
+
+// Agrégat sur une liste d'entités (et éventuellement un service précis)
+function rCompute(ms, ents, svc){
+  ents = ents || rEnts();
+  var c = { nui:null, pas:null, rep:null, repN:null, col:null, men:null, prest:null, mnt:null, fac:null, ec:null, lig:null,
+            js:0, slots:0, exp:rExp(ms), P:[] };
+  function add(k, v){ if (v === null || v === undefined) return; c[k] = (c[k] || 0) + v; }
+  var entLevel = !svc && !RST.fam;
+  ents.forEach(function(e){
+    RST.order[e].forEach(function(s){
+      if (svc && s !== svc) return;
+      var a = rSvc(e, s, ms);
+      if (!svc && RST.fam && a.fam !== RST.fam) return;
+      c.P.push(a); c.js += a.js; c.slots++;
+      if (!a.hs) {
+        if (a.pass) add('pas', a.act); else { add('nui', a.act); add('repN', a.rep); }
+        add('rep', a.rep); add('col', a.col); add('men', a.men); add('prest', a.prest);
+      }
+    });
+    if (entLevel) {
+      var t = RST.ix[e]['Entité'] || {}, m = rSum(t.eMnt, ms);
+      if (m === null) RST.order[e].forEach(function(s){ add('mnt', rSum(RST.ix[e][s].mnt, ms)); }); else add('mnt', m);
+      add('fac', rSum(t.eFac, ms)); add('ec', rSum(t.eEc, ms)); add('lig', rSum(t.eLig, ms));
+    }
+  });
+  if (!entLevel) c.P.forEach(function(a){ add('mnt', a.mnt); });
+  c.mode = (c.nui > 0 || !(c.pas > 0)) ? 'n' : 'p';
+  c.act = c.mode === 'n' ? c.nui : c.pas;
+  c.repM = c.mode === 'n' ? c.repN : c.rep;
+  c.ratio = (c.act > 0 && c.repM !== null) ? c.repM / c.act : null;
+  c.cout = (c.act > 0 && c.mnt > 0) ? c.mnt / c.act : null;
+  c.prestU = (c.act > 0 && c.prest !== null) ? c.prest / c.act : null;
+  c.prix = (c.prest > 0 && c.mnt > 0) ? c.mnt / c.prest : null;
+  c.cov = (c.slots && c.exp) ? Math.min(1, c.js / (c.slots * c.exp)) : 0;
+  c.has = (c.act !== null || c.rep !== null || c.mnt !== null);
+  return c;
+}
+function rRef(ms){ return rCompute(ms, rEnts(true)); }
+
+// Dimensions d'analyse : entités (vision Région) ou services (vision entité)
+function rDims(ms){
+  var out = [];
+  if (!RST.ent) {
+    rEnts(true).forEach(function(e){
+      var c = rCompute(ms, [e]);
+      out.push({ k:e, label:e, sub:RST_CITY[e]||'', color:RST_COLOR[e]||'#64748b', c:c, e:e });
+    });
+  } else {
+    RST.order[RST.ent].forEach(function(s){
+      if (RST.fam && rFam(s) !== RST.fam) return;
+      var c = rCompute(ms, [RST.ent], s);
+      out.push({ k:s, label:rShort(s) + (c.mode==='p' && !c.nui ? ' (passage)' : ''), sub:rFam(s), color:RST_FAMC[rFam(s)], c:c, e:RST.ent, s:s });
+    });
+  }
+  return out;
+}
+// Référence par service = médiane des entités (≥3 valeurs)
+function rSvcMed(ms){
+  var by = {};
+  RST.ents.forEach(function(e){ RST.order[e].forEach(function(s){
+    var a = rSvc(e, s, ms); if (a.hs) return;
+    var o = by[s] = by[s] || { c:[], r:[], p:[] };
+    if (a.cout !== null) o.c.push(a.cout); if (a.ratio !== null) o.r.push(a.ratio); if (a.prix !== null) o.p.push(a.prix);
+  }); });
+  var med = {};
+  Object.keys(by).forEach(function(s){ med[s] = { c: by[s].c.length>=3 ? rMedian(by[s].c) : null, r: by[s].r.length>=3 ? rMedian(by[s].r) : null, p: by[s].p.length>=3 ? rMedian(by[s].p) : null }; });
+  return med;
+}
+function rDimRef(d, ref, med){
+  if (!RST.ent) return ref.cout;
+  var m = med[d.s]; return m ? m.c : null;
+}
+
+/* ---------- Rendu ---------- */
+function rstRender(){
+  if (!RST.ix) return;
+  var ms = rMs(), c = rCompute(ms), ref = rRef(ms), prev = null, m = ms.length === 1 ? ms[0] : -1;
+  if (m > 0) { var pc = rCompute([m-1]); if (pc.has) prev = pc; }
+  var scope = RST.ent ? '<b>' + RST.ent + '</b> · ' + (RST_CITY[RST.ent]||'') : '<b>Région Centre</b> · ' + RST.ents.length + ' entités';
+  rEl('rstScope').innerHTML = 'Périmètre : ' + scope + ' &nbsp;·&nbsp; Période : <b>' + rPeriodLabel(ms) + '</b>' + (RST.fam ? ' &nbsp;·&nbsp; Famille : <b>' + RST.fam + '</b>' : '');
+  rstKpis(c, ref, prev, ms);
+  rstStrip(c, ms);
+  rstCharts(ms, c, ref);
+  rstRenderTable1(ms, c, ref);
+  rstRenderTable2();
+}
+
+/* ---------- KPI ---------- */
+function rCount(el, to, fmt){
+  if (!el) return;
+  if (to === null || to === undefined || isNaN(to)) { el.textContent = '—'; el._v = null; return; }
+  var from = (typeof el._v === 'number') ? el._v : 0, t0 = performance.now(), dur = 700;
+  el._v = to;
+  function step(t){
+    var k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.innerHTML = fmt(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(step); else el.innerHTML = fmt(to);
+  }
+  requestAnimationFrame(step);
+}
+// delta : badChange=true -> une hausse est défavorable (coûts)
+function rDelta(cur, prev, badUp){
+  var d = rRel(cur, prev); if (d === null) return '';
+  var cls = Math.abs(d) < 0.005 ? 'eq' : ((d > 0) === !!badUp ? 'badd' : 'good');
+  return '<span class="rst-delta ' + cls + '">' + (d >= 0 ? '+' : '−') + Math.abs(Math.round(d * 100)) + ' %</span>';
+}
+function rVsRef(cur, ref, dec, unit){
+  if (RST.ent === '' || cur === null || ref === null) return '';
+  var d = rRel(cur, ref); if (d === null) return '';
+  var cls = Math.abs(d) < 0.03 ? 'eq' : (d > 0 ? 'badd' : 'good');
+  return '<span class="rst-delta ' + cls + '">' + rSgn(d * 100, function(x){ return Math.round(x); }) + ' %</span> vs région (' + rDec(ref, dec) + (unit ? ' ' + unit : '') + ')';
+}
+function rstKpis(c, ref, prev, ms){
+  var m = ms.length === 1 ? ms[0] : -1, u = c.mode === 'n' ? 'nuitée' : 'passage';
+  var vs = m > 0 ? ' vs ' + RST_MOIS[m-1].toLowerCase() : '';
+  var per = m < 0 ? 'Cumul T4 2026' : RST_MOIS[m] + ' 2026';
+  rEl('rT1').textContent = c.mode === 'n' ? 'Nuitées' : 'Passages';
+  rEl('rT4').textContent = 'Coût HT par ' + u;
+  rEl('rT5').textContent = 'Repas par ' + u;
+
+  rCount(rEl('rK1'), c.act, rInt);
+  rEl('rK1s').innerHTML = (prev ? rDelta(c.act, prev.act, false) + vs : per) + (c.mode === 'n' && c.pas > 0 ? '<br>+ ' + rInt(c.pas) + ' passages (HDJ, chimio)' : '');
+  rCount(rEl('rK2'), c.rep, rInt);
+  rEl('rK2s').innerHTML = (prev ? rDelta(c.rep, prev.rep, false) + vs + '<br>' : '') + 'Collations ' + rInt(c.col) + ' · Menus améliorés ' + rInt(c.men);
+  rCount(rEl('rK3'), c.mnt, function(x){ return rMad(x) + '<small>MAD</small>'; });
+  var share = (RST.ent && ref.mnt > 0 && c.mnt !== null) ? rPct(c.mnt / ref.mnt) + ' du montant région' : '';
+  rEl('rK3s').innerHTML = (prev ? rDelta(c.mnt, prev.mnt, true) + vs + '<br>' : '') + share;
+  rCount(rEl('rK4'), c.cout, function(x){ return rDec(x, 1) + '<small>MAD</small>'; });
+  rEl('rK4s').innerHTML = (prev && prev.cout ? rDelta(c.cout, prev.cout, true) + vs + '<br>' : '') + (rVsRef(c.cout, ref.cout, 1, 'MAD') || (c.cout === null ? 'Grille tarifaire ou activité manquante' : 'Montant contrat HT / ' + u));
+  rCount(rEl('rK5'), c.ratio, function(x){ return rDec(x, 2); });
+  rEl('rK5s').innerHTML = (prev && prev.ratio ? rDelta(c.ratio, prev.ratio, true) + vs + '<br>' : '') + (rVsRef(c.ratio, ref.ratio, 2, '') || 'Repas patients hors collations');
+  rCount(rEl('rK6'), c.prix, function(x){ return rDec(x, 1) + '<small>MAD</small>'; });
+  rEl('rK6s').innerHTML = (prev && prev.prix ? rDelta(c.prix, prev.prix, true) + vs + '<br>' : '') + (rVsRef(c.prix, ref.prix, 1, 'MAD') || 'Montant / (repas + collations + menus)');
+}
+function rstStrip(c, ms){
+  var unit = c.mode === 'n' ? 'nuitée' : 'passage';
+  var items = [
+    { i:'fa-file-invoice', c:'#f59e0b', bg:'#fffbeb', t:'Facturé HT', v:(c.fac !== null && !RST.fam) ? rMad(c.fac) + ' MAD' : '—', s:(RST.fam ? 'Disponible toutes familles' : 'Montant facturé') },
+    { i:'fa-scale-unbalanced', c:(c.ec > 0 ? '#ef4444' : '#10b981'), bg:(c.ec > 0 ? '#fef2f2' : '#f0fdf4'), t:'Écart facturation', v:(c.ec !== null && !RST.fam) ? rSgn(c.ec, rMad) + ' MAD' : '—', s:(c.lig ? rInt(c.lig) + ' ligne(s) en écart' : 'Facturé − contrat') },
+    { i:'fa-mug-hot', c:'#0ea5e9', bg:'#f0f9ff', t:'Collations par ' + unit, v:(c.act > 0 && c.col !== null) ? rDec(c.col / c.act, 2) : '—', s:rInt(c.col) + ' collations' },
+    { i:'fa-star', c:'#8b5cf6', bg:'#f5f3ff', t:'Part menus améliorés', v:(c.prest > 0 && c.men !== null) ? rDec(c.men / c.prest * 100, 1) + ' %' : '—', s:rInt(c.men) + ' menus améliorés' },
+    { i:'fa-database', c:'#64748b', bg:'#f1f5f9', t:'Couverture des données', v:c.exp ? rPct(c.cov) : '—', s:'Jours renseignés / jours écoulés' }
+  ];
+  rEl('rstStrip').innerHTML = items.map(function(x){
+    return '<div class="rst-mini" style="--c:' + x.c + ';--bg:' + x.bg + '"><div><b>' + x.t + '</b><span>' + x.v + '</span><em>' + x.s + '</em></div></div>';
+  }).join('');
+}
+
+/* ---------- Plugins graphiques ---------- */
+var rLbl = { id:'rLbl', afterDatasetsDraw:function(ch){
+  var ctx = ch.ctx, horiz = ch.options.indexAxis === 'y';
+  ch.data.datasets.forEach(function(ds, di){
+    var o = ds.rl; if (!o || !ch.isDatasetVisible(di)) return;
+    var meta = ch.getDatasetMeta(di);
+    meta.data.forEach(function(el, i){
+      var raw = ds.data[i]; if (raw === null || raw === undefined) return;
+      var v = o.vals ? o.vals[i] : raw; if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return;
+      var txt = o.fmt(v, i); if (!txt) return;
+      var x, y;
+      ctx.save(); ctx.font = '700 ' + (o.size || 11) + "px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillStyle = typeof o.color === 'function' ? o.color(i) : (o.color || '#334155');
+      if (meta.type === 'bar') {
+        if (horiz) {
+          if (o.pos === 'center') { if (Math.abs(el.x - el.base) < (o.min || 40)) { ctx.restore(); return; } x = (el.x + el.base) / 2; y = el.y; ctx.textAlign = 'center'; }
+          else { x = Math.max(el.x, el.base) + 6; if (ds.refs && ds.refs[i] !== null && ds.refs[i] !== undefined) x = Math.max(x, ch.scales.x.getPixelForValue(ds.refs[i]) + 8); y = el.y; ctx.textAlign = 'left'; }
+          ctx.textBaseline = 'middle';
+        } else {
+          if (o.pos === 'center') { if (Math.abs(el.y - el.base) < (o.min || 16)) { ctx.restore(); return; } x = el.x; y = (el.y + el.base) / 2; ctx.textBaseline = 'middle'; }
+          else { x = el.x; y = Math.min(el.y, el.base) - 6; ctx.textBaseline = 'bottom'; }
+          ctx.textAlign = 'center';
+        }
+      } else { x = el.x; y = o.pos === 'below' ? el.y + 10 : el.y - 10; ctx.textAlign = 'center'; ctx.textBaseline = o.pos === 'below' ? 'top' : 'bottom'; }
+      ctx.fillText(txt, x, y); ctx.restore();
+    });
+  });
+} };
+var rRefs = { id:'rRefs', afterDatasetsDraw:function(ch){
+  var ds = ch.data.datasets[0]; if (!ds || !ds.refs) return;
+  var meta = ch.getDatasetMeta(0), sx = ch.scales.x, ctx = ch.ctx;
+  meta.data.forEach(function(el, i){
+    var r = ds.refs[i]; if (r === null || r === undefined) return;
+    var x = sx.getPixelForValue(r), h = (el.height || 20) / 2 + 3;
+    ctx.save(); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x, el.y - h); ctx.lineTo(x, el.y + h); ctx.stroke(); ctx.restore();
+  });
+} };
+function rKill(k){ if (RST.ch[k]) { RST.ch[k].destroy(); RST.ch[k] = null; } }
+var R_AX = { color:'#64748b', font:{ size:11, weight:'600' } };
+var R_GRID = { color:'#eef0f8', drawBorder:false };
+function rLegend(extra){ var o = { position:'bottom', labels:{ usePointStyle:true, boxWidth:8, font:{ size:11, weight:'700' }, filter:function(it, d){ return !d.datasets[it.datasetIndex].noLegend; } } }; if (extra) for (var k in extra) o[k] = extra[k]; return o; }
+
+/* ---------- Graphiques ---------- */
+function rstCharts(ms, c, ref){
+  if (typeof Chart === 'undefined') return;
+  Chart.defaults.font.family = "'Plus Jakarta Sans', sans-serif";
+  var dims = rDims(ms), med = rSvcMed(ms), u = c.mode === 'n' ? 'nuitée' : 'unité';
+  var regionView = !RST.ent;
+
+  /* A. Coût par unité d'activité */
+  rKill('A');
+  var dA = dims.filter(function(d){ return d.c.cout !== null; }).sort(function(a, b){ return b.c.cout - a.c.cout; });
+  rEl('rstTA').textContent = regionView ? 'Coût HT par nuitée par entité' : 'Coût HT par unité d\'activité par service';
+  rEl('rstSA').textContent = regionView ? 'MAD HT par nuitée. Trait noir : référence régionale (' + (ref.cout ? rDec(ref.cout, 1) + ' MAD' : '—') + '). Rouge : supérieur de plus de 5 % ; vert : inférieur de plus de 5 %.' : 'MAD HT par nuitée ou par passage. Trait noir : médiane des entités pour le même service. Rouge : supérieur de plus de 5 % ; vert : inférieur de plus de 5 %.';
+  var refsA = dA.map(function(d){ return rDimRef(d, ref, med); });
+  RST.ch.A = new Chart(rEl('rstChA'), {
+    type:'bar',
+    data:{ labels:dA.map(function(d){ return d.label; }), datasets:[{
+      data:dA.map(function(d){ return d.c.cout; }), refs:refsA, borderRadius:7, maxBarThickness:30,
+      backgroundColor:dA.map(function(d, i){ var r = refsA[i]; return !r ? RST_NEUT : d.c.cout > r * 1.05 ? RST_BAD : d.c.cout < r * 0.95 ? RST_GOOD : RST_NEUT; }),
+      rl:{ fmt:function(v, i){ var r = refsA[i], d = r ? rRel(v, r) : null; return rDec(v, 1) + (d !== null ? '  (' + rSgn(d * 100, function(x){ return Math.round(x); }) + ' %)' : ''); }, color:function(i){ var r = refsA[i], v = dA[i].c.cout; return !r ? '#334155' : v > r * 1.05 ? '#b91c1c' : v < r * 0.95 ? '#15803d' : '#334155'; } }
+    }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, layout:{ padding:{ right:90 } },
+      plugins:{ legend:{ display:false }, datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ var r = refsA[x.dataIndex]; return [' ' + rDec(x.parsed.x, 1) + ' MAD', r ? ' Référence : ' + rDec(r, 1) + ' MAD' : '']; } } } },
+      scales:{ x:{ beginAtZero:true, grid:R_GRID, ticks:R_AX }, y:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } } } },
+    plugins:[rLbl, rRefs]
+  });
+
+  /* B. Montant HT */
+  rKill('B');
+  if (regionView) {
+    rEl('rstTB').textContent = 'Montant contrat HT par entité et famille de service';
+    rEl('rstSB').textContent = 'En MAD HT, total affiché au-dessus de chaque barre';
+    var ents = dims.filter(function(d){ return d.c.mnt > 0; });
+    var famData = RST_FAMS.map(function(f){
+      return { f:f, data: ents.map(function(d){ var t = 0; d.c.P.forEach(function(a){ if (a.fam === f && a.mnt) t += a.mnt; }); return t; }) };
+    }).filter(function(x){ return x.data.some(function(v){ return v > 0; }); });
+    var tots = ents.map(function(d){ return d.c.mnt; });
+    var dsB = famData.map(function(x){ return { type:'bar', label:x.f, data:x.data, backgroundColor:RST_FAMC[x.f], borderRadius:3, maxBarThickness:60, stack:'s',
+      rl:{ pos:'center', size:10, color:'#fff', min:20, fmt:function(v){ return v > 0 ? rMad(v) : ''; } } }; });
+    dsB.push({ type:'line', label:'Total', data:tots, showLine:false, pointRadius:0, noLegend:true, rl:{ size:12, color:'#1e293b', fmt:function(v){ return rMad(v); } } });
+    RST.ch.B = new Chart(rEl('rstChB'), {
+      data:{ labels:ents.map(function(d){ return d.label; }), datasets:dsB },
+      options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:22 } },
+        plugins:{ legend:rLegend(), datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ return ' ' + x.dataset.label + ' : ' + rInt(x.parsed.y) + ' MAD'; } } } },
+        scales:{ x:{ stacked:true, grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } }, y:{ stacked:true, grid:R_GRID, ticks:{ color:'#64748b', callback:function(v){ return rMad(v); } } } } },
+      plugins:[rLbl]
+    });
+  } else {
+    rEl('rstTB').textContent = 'Montant contrat HT par service';
+    rEl('rstSB').textContent = 'En MAD HT, part du total entre parenthèses';
+    var dB = dims.filter(function(d){ return d.c.mnt > 0; }).sort(function(a, b){ return b.c.mnt - a.c.mnt; }), tB = dB.reduce(function(s, d){ return s + d.c.mnt; }, 0);
+    RST.ch.B = new Chart(rEl('rstChB'), {
+      type:'bar',
+      data:{ labels:dB.map(function(d){ return d.label; }), datasets:[{ data:dB.map(function(d){ return d.c.mnt; }), backgroundColor:dB.map(function(d){ return d.color; }), borderRadius:7, maxBarThickness:28,
+        rl:{ fmt:function(v){ return rMad(v) + '  (' + Math.round(v / tB * 100) + ' %)'; } } }] },
+      options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, layout:{ padding:{ right:80 } },
+        plugins:{ legend:{ display:false }, datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ return ' ' + rInt(x.parsed.x) + ' MAD HT'; } } } },
+        scales:{ x:{ beginAtZero:true, grid:R_GRID, ticks:{ color:'#64748b', callback:function(v){ return rMad(v); } } }, y:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } } } },
+      plugins:[rLbl]
+    });
+  }
+
+  /* C. Matrice consommation / prix */
+  rKill('C');
+  var dC = dims.filter(function(d){ return d.c.prestU !== null && d.c.prix !== null && d.c.mnt > 0; });
+  var refC = regionView ? ref : rCompute(ms, [RST.ent]);
+  var maxM = Math.max.apply(null, dC.map(function(d){ return d.c.mnt; }).concat([1]));
+  var xs = dC.map(function(d){ return d.c.prestU; }).concat(refC.prestU ? [refC.prestU] : []), ys = dC.map(function(d){ return d.c.prix; }).concat(refC.prix ? [refC.prix] : []);
+  var xmin = xs.length ? Math.min.apply(null, xs) : 0, xmax = xs.length ? Math.max.apply(null, xs) : 1, ymin = ys.length ? Math.min.apply(null, ys) : 0, ymax = ys.length ? Math.max.apply(null, ys) : 1;
+  var px = (xmax - xmin || 1) * 0.25, py = (ymax - ymin || 1) * 0.25;
+  RST.ch.C = new Chart(rEl('rstChC'), {
+    type:'bubble',
+    data:{ datasets:dC.map(function(d){ return { label:d.label, data:[{ x:d.c.prestU, y:d.c.prix, r:9 + 24 * Math.sqrt(d.c.mnt / maxM) }], backgroundColor:d.color + 'cc', borderColor:d.color, borderWidth:2 }; }) },
+    options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:10, right:30 } },
+      plugins:{ legend:{ display:false }, datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ var d = dC[x.datasetIndex]; return [' ' + d.label, ' ' + rDec(d.c.prestU, 2) + ' prestations / unité', ' ' + rDec(d.c.prix, 1) + ' MAD / prestation', ' ' + rInt(d.c.mnt) + ' MAD HT']; } } } },
+      scales:{ x:{ min:Math.max(0, xmin - px), max:xmax + px, grid:R_GRID, ticks:R_AX, title:{ display:true, text:'Prestations servies par unité d\'activité', color:'#64748b', font:{ size:11, weight:'700' } } },
+               y:{ min:Math.max(0, ymin - py), max:ymax + py, grid:R_GRID, ticks:R_AX, title:{ display:true, text:'Prix moyen par prestation (MAD)', color:'#64748b', font:{ size:11, weight:'700' } } } } },
+    plugins:[{ id:'rBub', afterDatasetsDraw:function(ch){
+      var ctx = ch.ctx, sx = ch.scales.x, sy = ch.scales.y, a = ch.chartArea;
+      ctx.save(); ctx.setLineDash([6, 4]); ctx.strokeStyle = '#475569'; ctx.lineWidth = 1.2;
+      if (refC.prestU) { var x = sx.getPixelForValue(refC.prestU); ctx.beginPath(); ctx.moveTo(x, a.top); ctx.lineTo(x, a.bottom); ctx.stroke(); }
+      if (refC.prix) { var y = sy.getPixelForValue(refC.prix); ctx.beginPath(); ctx.moveTo(a.left, y); ctx.lineTo(a.right, y); ctx.stroke(); }
+      ctx.restore();
+      var used = [];
+      ch.data.datasets.forEach(function(ds, i){
+        var el = ch.getDatasetMeta(i).data[0]; if (!el) return;
+        ctx.save(); ctx.font = "800 11px 'Plus Jakarta Sans'"; var w = ctx.measureText(ds.label).width, r = el.options.radius, pos = null;
+        [[el.x, el.y - r - 3, 'bottom'], [el.x, el.y + r + 3, 'top'], [el.x + r + 4 + w / 2, el.y, 'middle'], [el.x - r - 4 - w / 2, el.y, 'middle']].some(function(c){
+          var y0 = c[2] === 'bottom' ? c[1] - 12 : c[2] === 'top' ? c[1] : c[1] - 6, box = { x0:c[0] - w / 2, x1:c[0] + w / 2, y0:y0, y1:y0 + 12 };
+          var hit = used.some(function(b){ return box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0; });
+          if (!hit) { pos = c; used.push(box); return true; } return false;
+        });
+        if (pos) { ctx.fillStyle = '#1e293b'; ctx.textAlign = 'center'; ctx.textBaseline = pos[2]; ctx.fillText(ds.label, pos[0], pos[1]); }
+        ctx.restore();
+      });
+    } }]
+  });
+  /* D. Évolution mensuelle */
+  rKill('D');
+  var cm = [0,1,2].map(function(m){ return rElapsed(m) > 0 ? rCompute([m]) : null; });
+  var withData = cm.filter(function(x){ return x && x.has && x.act > 0; }).length;
+  rEl('rstTD').textContent = regionView ? 'Évolution mensuelle du coût HT par nuitée' : 'Évolution mensuelle du montant HT';
+  if (regionView && withData < 2) {
+    rEl('rstTD').textContent = 'Repas et collations par nuitée';
+    rEl('rstSD').textContent = 'Par entité. L\'évolution mensuelle sera affichée dès que deux mois comportent des données.';
+    var eD = dims.filter(function(d){ return d.c.act > 0; });
+    RST.ch.D = new Chart(rEl('rstChD'), {
+      type:'bar',
+      data:{ labels:eD.map(function(d){ return d.label; }), datasets:[
+        { label:'Repas patients / nuitée', data:eD.map(function(d){ return d.c.ratio; }), backgroundColor:'#6366f1', borderRadius:7, maxBarThickness:42, rl:{ fmt:function(v){ return rDec(v, 2); }, color:'#4338ca' } },
+        { label:'Collations / nuitée', data:eD.map(function(d){ return (d.c.act > 0 && d.c.col !== null) ? d.c.col / d.c.act : null; }), backgroundColor:'#0ea5e9', borderRadius:7, maxBarThickness:42, rl:{ fmt:function(v){ return rDec(v, 2); }, color:'#0369a1' } } ] },
+      options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:20 } }, plugins:{ legend:rLegend(), datalabels:{ display:false } },
+        scales:{ y:{ beginAtZero:true, grid:R_GRID, ticks:R_AX }, x:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } } } },
+      plugins:[rLbl]
+    });
+  } else if (regionView) {
+    rEl('rstSD').textContent = 'MAD HT par nuitée. Pointillés : moyenne régionale.';
+    var dsD = rEnts(true).map(function(e){
+      return { type:'line', label:e, data:[0,1,2].map(function(m){ if (rElapsed(m) === 0) return null; var x = rCompute([m], [e]); return x.cout; }), borderColor:RST_COLOR[e]||'#64748b', backgroundColor:RST_COLOR[e]||'#64748b', borderWidth:3, tension:.3, pointRadius:5, pointHoverRadius:7, spanGaps:false };
+    });
+    dsD.push({ type:'line', label:'Moyenne région', data:cm.map(function(x){ return x ? x.cout : null; }), borderColor:'#0f172a', borderDash:[6, 4], borderWidth:2, pointRadius:0, fill:false, spanGaps:false, rl:{ pos:'below', size:10, color:'#0f172a', fmt:function(v){ return rDec(v, 1); } } });
+    RST.ch.D = new Chart(rEl('rstChD'), {
+      data:{ labels:RST_MOIS, datasets:dsD },
+      options:{ responsive:true, maintainAspectRatio:false, interaction:{ mode:'index', intersect:false }, layout:{ padding:{ top:14 } },
+        plugins:{ legend:rLegend(), datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ return ' ' + x.dataset.label + ' : ' + rDec(x.parsed.y, 1) + ' MAD / nuitée'; } } } },
+        scales:{ y:{ grid:R_GRID, ticks:R_AX }, x:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } } } }
+    });
+  } else {
+    rEl('rstSD').textContent = 'Montant contrat HT (barres, axe gauche) et coût HT par ' + u + ' (courbe, axe droit).';
+    RST.ch.D = new Chart(rEl('rstChD'), {
+      data:{ labels:RST_MOIS, datasets:[
+        { type:'bar', label:'Montant HT (MAD)', data:cm.map(function(x){ return x && x.mnt ? x.mnt : null; }), backgroundColor:'rgba(99,102,241,.85)', borderRadius:8, maxBarThickness:70, yAxisID:'y', rl:{ pos:'center', color:'#fff', size:11, fmt:function(v){ return rMad(v); } } },
+        { type:'line', label:'Coût HT / unité (MAD)', data:cm.map(function(x){ return x ? x.cout : null; }), borderColor:'#f59e0b', backgroundColor:'#f59e0b', borderWidth:3, tension:.3, pointRadius:6, yAxisID:'y1', spanGaps:false, rl:{ size:11, color:'#b45309', fmt:function(v){ return rDec(v, 1); } } } ] },
+      options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:18 } },
+        plugins:{ legend:rLegend(), datalabels:{ display:false } },
+        scales:{ y:{ beginAtZero:true, grid:R_GRID, ticks:{ color:'#64748b', callback:function(v){ return rMad(v); } } }, y1:{ position:'right', beginAtZero:true, grid:{ display:false }, ticks:R_AX }, x:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } } } },
+      plugins:[rLbl]
+    });
+  }
+
+  /* E. Pont volume / consommation / prix */
+  rstBridge(ms);
+
+  /* F. Répartition par famille */
+  rKill('F');
+  var fm = {}; c.P.forEach(function(a){ if (a.mnt > 0) fm[a.fam] = (fm[a.fam] || 0) + a.mnt; });
+  var fk = RST_FAMS.filter(function(f){ return fm[f] > 0; }), fv = fk.map(function(f){ return fm[f]; }), ft = fv.reduce(function(s, x){ return s + x; }, 0);
+  RST.ch.F = new Chart(rEl('rstChF'), {
+    type:'doughnut',
+    data:{ labels:fk, datasets:[{ data:fv, backgroundColor:fk.map(function(f){ return RST_FAMC[f]; }), borderColor:'#fff', borderWidth:3, hoverOffset:10 }] },
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'62%',
+      plugins:{ legend:{ position:'right', labels:{ usePointStyle:true, boxWidth:8, font:{ size:11, weight:'700' }, generateLabels:function(ch){ return ch.data.labels.map(function(l, i){ return { text:l + '  ' + rMad(fv[i]) + ' (' + Math.round(fv[i] / ft * 100) + ' %)', fillStyle:RST_FAMC[l], strokeStyle:RST_FAMC[l], pointStyle:'circle', index:i, hidden:false }; }); } } },
+        datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ return ' ' + x.label + ' : ' + rInt(x.parsed) + ' MAD HT (' + Math.round(x.parsed / ft * 100) + ' %)'; } } } } },
+    plugins:[{ id:'rCtr', afterDraw:function(ch){
+      if (!ft) return; var a = ch.chartArea, cx = (a.left + a.right) / 2, cy = (a.top + a.bottom) / 2, x = ch.ctx;
+      x.save(); x.textAlign = 'center'; x.fillStyle = '#1e293b'; x.font = "900 20px 'Plus Jakarta Sans'"; x.fillText(rMad(ft), cx, cy + 2);
+      x.fillStyle = '#94a3b8'; x.font = "700 11px 'Plus Jakarta Sans'"; x.fillText('MAD HT', cx, cy + 18); x.restore(); } }]
+  });
+}
+
+/* ---------- Pont du montant ---------- */
+function rBridgePair(ms){
+  var avail = [0,1,2].filter(function(m){ if (rElapsed(m) === 0) return false; var x = rCompute([m]); return x.nui > 0 && x.prest > 0 && x.mnt > 0; });
+  if (ms.length === 1) { var m = ms[0]; return (m > 0 && avail.indexOf(m) > -1 && avail.indexOf(m-1) > -1) ? [m-1, m] : null; }
+  return avail.length >= 2 ? [avail[avail.length-2], avail[avail.length-1]] : null;
+}
+function rstBridge(ms){
+  rKill('E');
+  var pr = rBridgePair(ms), cv = rEl('rstChE'), sub = rEl('rstSE');
+  cv.parentNode.style.display = pr ? 'block' : 'none';
+  if (!pr) {
+    cv.style.display = 'none';
+    sub.textContent = 'Disponible dès que deux mois comportent de l\'activité et des montants';
+    return;
+  }
+  cv.style.display = 'block';
+  var A = rCompute([pr[0]]), B = rCompute([pr[1]]);
+  var partial = rElapsed(pr[0]) < RST.jours[pr[0]] || rElapsed(pr[1]) < RST.jours[pr[1]];
+  var fa = partial ? 1 / rElapsed(pr[0]) : 1, fb = partial ? 1 / rElapsed(pr[1]) : 1;   // mois partiel : base par jour écoulé
+  var Na = A.nui * fa, Nb = B.nui * fb, Ia = A.prest / A.nui, Ib = B.prest / B.nui, Pa = A.mnt / A.prest, Pb = B.mnt / B.prest;
+  A = { mnt:A.mnt * fa }; B = { mnt:B.mnt * fb };
+  var eV = (Nb - Na) * Ia * Pa, eC = Nb * (Ib - Ia) * Pa, eP = Nb * Ib * (Pb - Pa), tot = B.mnt - A.mnt;
+  var steps = [
+    { l:RST_MOIS[pr[0]], lo:0, hi:A.mnt, v:A.mnt, total:true },
+    { l:'Effet volume', lo:Math.min(A.mnt, A.mnt + eV), hi:Math.max(A.mnt, A.mnt + eV), v:eV },
+    { l:'Effet consommation', lo:Math.min(A.mnt + eV, A.mnt + eV + eC), hi:Math.max(A.mnt + eV, A.mnt + eV + eC), v:eC },
+    { l:'Effet prix', lo:Math.min(A.mnt + eV + eC, B.mnt), hi:Math.max(A.mnt + eV + eC, B.mnt), v:eP },
+    { l:RST_MOIS[pr[1]], lo:0, hi:B.mnt, v:B.mnt, total:true }
+  ];
+  sub.textContent = RST_MOIS[pr[0]] + ' à ' + RST_MOIS[pr[1]] + ', en MAD HT' + (partial ? ' par jour écoulé' : '') + '. Rouge : hausse ; vert : baisse.';
+  RST.ch.E = new Chart(cv, {
+    type:'bar',
+    data:{ labels:steps.map(function(s){ return s.l; }), datasets:[{ data:steps.map(function(s){ return [s.lo, s.hi]; }), borderRadius:6, maxBarThickness:70,
+      backgroundColor:steps.map(function(s){ return s.total ? RST_NEUT : (s.v > 0 ? RST_BAD : RST_GOOD); }),
+      rl:{ vals:steps.map(function(s){ return s.v; }), size:12, fmt:function(v, i){ return steps[i].total ? rMad(v) : rSgn(v, rMad); }, color:function(i){ return steps[i].total ? '#1e293b' : (steps[i].v > 0 ? '#b91c1c' : '#15803d'); } } }] },
+    options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:24 } },
+      plugins:{ legend:{ display:false }, datalabels:{ display:false }, tooltip:{ callbacks:{ label:function(x){ var s = steps[x.dataIndex]; return ' ' + (s.total ? rInt(s.v) : rSgn(s.v, rInt)) + ' MAD HT'; } } } },
+      scales:{ y:{ grid:R_GRID, ticks:{ color:'#64748b', callback:function(v){ return rMad(v); } }, suggestedMin:Math.min(A.mnt, B.mnt) * 0.85 }, x:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:11, weight:'800' } } } } },
+    plugins:[rLbl]
+  });
+}
+
+/* ---------- Comparatif ---------- */
+var RST_C1 = [
+  { k:'label', t:'', l:1 }, { k:'act', t:'Activité' }, { k:'rep', t:'Repas' }, { k:'ratio', t:'Repas / unité' }, { k:'prestU', t:'Prest. / unité' },
+  { k:'prix', t:'Prix moyen' }, { k:'mnt', t:'Montant HT' }, { k:'part', t:'Part' }, { k:'cout', t:'Coût / unité' }, { k:'ecart', t:'Écart vs réf.' },
+  { k:'surcout', t:'Surcoût vs réf.' }, { k:'fac', t:'Facturé HT' }, { k:'ec', t:'Écart fact.' }
+];
+function rBind(thId, cols, sortKey, fn){
+  var th = rEl(thId);
+  th.innerHTML = cols.map(function(c){ return '<th class="' + (c.l ? 'l' : '') + '" data-k="' + c.k + '">' + c.t + '<span class="ar">' + (RST[sortKey].k === c.k ? (RST[sortKey].d > 0 ? '▲' : '▼') : '') + '</span></th>'; }).join('');
+  th.onclick = function(ev){ var h = ev.target.closest ? ev.target.closest('th') : null; if (!h) return; var k = h.getAttribute('data-k'); RST[sortKey] = { k:k, d:RST[sortKey].k === k ? -RST[sortKey].d : -1 }; fn(); };
+}
+function rstRenderTable1(ms, c, ref){
+  var dims = rDims(ms).filter(function(d){ return d.c.has; }), med = rSvcMed(ms), tot = c.mnt || 0;
+  rEl('rstTT1').textContent = RST.ent ? 'Comparatif des services · ' + RST.ent : 'Comparatif des entités';
+  var rows = dims.map(function(d){
+    var r = rDimRef(d, ref, med), x = d.c;
+    return { d:d, label:d.label, act:x.act, rep:x.repM, ratio:x.ratio, prestU:x.prestU, prix:x.prix, mnt:x.mnt, part:tot > 0 && x.mnt ? x.mnt / tot : null, cout:x.cout,
+      ecart:(r && x.cout !== null) ? rRel(x.cout, r) : null, surcout:(r && x.cout !== null && x.act > 0) ? (x.cout - r) * x.act : null, fac:x.fac, ec:x.ec };
+  });
+  var k = RST.sort1.k, dd = RST.sort1.d;
+  rows.sort(function(a, b){ var x = a[k], y = b[k]; if (x === null || x === undefined) x = -Infinity; if (y === null || y === undefined) y = -Infinity; if (typeof x === 'string' || typeof y === 'string') return String(x).localeCompare(String(y), 'fr') * dd; return (x - y) * dd; });
+  var cols = RST_C1.slice(); cols[0] = { k:'label', t:RST.ent ? 'Service' : 'Entité', l:1 };
+  rBind('rstThead1', cols, 'sort1', function(){ rstRenderTable1(ms, c, ref); });
+  function chip(v){ if (v === null) return '—'; var cl = Math.abs(v) < 0.03 ? 'eq' : (v > 0 ? 'up' : 'dn'); return '<span class="rst-chip ' + cl + '">' + rSgn(v * 100, function(x){ return Math.round(x); }) + ' %</span>'; }
+  var h = rows.map(function(r){
+    var lab = RST.ent ? '<span class="rst-dot" style="background:' + r.d.color + '"></span>' + rEsc(r.label) : '<span class="rst-ent" style="background:' + r.d.color + '">' + rEsc(r.label) + '</span> <small style="color:#94a3b8">' + rEsc(r.d.sub) + '</small>';
+    return '<tr class="dr" data-e="' + r.d.e + '" ' + (r.d.s ? 'data-s="' + rEsc(r.d.s) + '"' : '') + '><td class="l sv">' + lab + '</td><td>' + rInt(r.act) + '</td><td>' + rInt(r.rep) + '</td><td>' + rDec(r.ratio, 2) + '</td><td>' + rDec(r.prestU, 2) + '</td><td>' + rDec(r.prix, 1) + '</td><td>' + rInt(r.mnt) + '</td><td>' + rPct(r.part) + '</td><td><b>' + rDec(r.cout, 1) + '</b></td><td>' + chip(r.ecart) + '</td><td style="color:' + (r.surcout > 0 ? '#b91c1c' : r.surcout < 0 ? '#15803d' : '#334155') + '">' + rSgn(r.surcout, rInt) + '</td><td>' + (r.fac ? rInt(r.fac) : '—') + '</td><td style="color:' + (r.ec > 0 ? '#b91c1c' : '#334155') + '">' + (r.ec !== null && r.fac ? rSgn(r.ec, rInt) : '—') + '</td></tr>';
+  }).join('');
+  h += '<tr class="tot"><td class="l">' + (RST.ent ? 'Total ' + RST.ent : 'Total Région') + '</td><td>' + rInt(c.act) + '</td><td>' + rInt(c.repM) + '</td><td>' + rDec(c.ratio, 2) + '</td><td>' + rDec(c.prestU, 2) + '</td><td>' + rDec(c.prix, 1) + '</td><td>' + rInt(c.mnt) + '</td><td>100 %</td><td>' + rDec(c.cout, 1) + '</td><td></td><td></td><td>' + (c.fac && !RST.fam ? rInt(c.fac) : '—') + '</td><td>' + (c.ec !== null && !RST.fam ? rSgn(c.ec, rInt) : '—') + '</td></tr>';
+  rEl('rstTbody1').innerHTML = h;
+  rEl('rstTbody1').onclick = function(ev){
+    var tr = ev.target.closest ? ev.target.closest('tr.dr') : null; if (!tr) return;
+    if (tr.getAttribute('data-s')) rstOpen(tr.getAttribute('data-e'), tr.getAttribute('data-s'));
+    else { RST.ent = tr.getAttribute('data-e'); rstPills(); rstRender(); window.scrollTo && rEl('rstPills').scrollIntoView({ behavior:'smooth', block:'start' }); }
+  };
+}
+
+/* ---------- Détail par service ---------- */
+var RST_C2 = [
+  { k:'e', t:'Entité', l:1 }, { k:'s', t:'Service', l:1 }, { k:'fam', t:'Famille', l:1 }, { k:'act', t:'Activité' }, { k:'rep', t:'Repas' }, { k:'ratio', t:'Repas / unité' },
+  { k:'col', t:'Collations' }, { k:'men', t:'Menus amél.' }, { k:'mnt', t:'Montant HT' }, { k:'cout', t:'Coût / unité' }, { k:'prix', t:'Prix moyen' }, { k:'cov', t:'Données' }
+];
+function rstRenderTable2(){
+  if (!RST.ix) return;
+  var ms = rMs(), P = rCompute(ms).P, q = (rEl('rstSearch').value || '').toLowerCase().trim(), med = rSvcMed(ms);
+  if (q) P = P.filter(function(a){ return (a.e + ' ' + a.s + ' ' + rShort(a.s) + ' ' + a.fam).toLowerCase().indexOf(q) > -1; });
+  var k = RST.sort2.k, d = RST.sort2.d;
+  P = P.slice().sort(function(a, b){ var x = a[k], y = b[k]; if (x === null || x === undefined) x = (typeof y === 'string') ? '' : -Infinity; if (y === null || y === undefined) y = (typeof x === 'string') ? '' : -Infinity; if (typeof x === 'string' || typeof y === 'string') return String(x).localeCompare(String(y), 'fr') * d; return (x - y) * d; });
+  rBind('rstThead2', RST_C2, 'sort2', rstRenderTable2);
+  rEl('rstTbody2').innerHTML = P.map(function(a){
+    var m = med[a.s] || {}, fr = '', fc = '';
+    if (m.r && a.ratio !== null && Math.abs(a.ratio / m.r - 1) > 0.25) fr = '<span class="rst-flag" title="Écart supérieur à 25 % de la médiane des entités (' + rDec(m.r, 2) + ')">&#9679;</span>';
+    if (m.c && a.cout !== null && Math.abs(a.cout / m.c - 1) > 0.25) fc = '<span class="rst-flag" title="Écart supérieur à 25 % de la médiane des entités (' + rDec(m.c, 1) + ' MAD)">&#9679;</span>';
+    var cc = a.cov >= 0.9 ? '#10b981' : a.cov > 0 ? '#f59e0b' : '#cbd5e1';
+    return '<tr class="dr" data-e="' + a.e + '" data-s="' + rEsc(a.s) + '"><td class="l"><span class="rst-ent" style="background:' + (RST_COLOR[a.e]||'#64748b') + '">' + a.e + '</span></td><td class="l sv">' + rEsc(rShort(a.s)) + '</td><td class="l"><span class="rst-dot" style="background:' + RST_FAMC[a.fam] + '"></span>' + a.fam + '</td>' +
+      '<td>' + (a.hs ? '—' : rInt(a.act) + ' <small style="color:#94a3b8">' + (a.pass ? 'pass.' : 'nuit.') + '</small>') + '</td><td>' + (a.hs ? '—' : rInt(a.rep)) + '</td><td>' + rDec(a.ratio, 2) + fr + '</td><td>' + (a.hs ? '—' : rInt(a.col)) + '</td><td>' + (a.hs ? '—' : rInt(a.men)) + '</td><td>' + rInt(a.mnt) + '</td><td><b>' + rDec(a.cout, 1) + '</b>' + fc + '</td><td>' + rDec(a.prix, 1) + '</td>' +
+      '<td><span class="rst-dot" style="background:' + cc + '" title="' + a.js + ' jour(s) renseigné(s) sur ' + a.exp + '"></span>' + rPct(a.cov) + '</td></tr>';
+  }).join('') || '<tr><td colspan="12" style="text-align:center;padding:30px;color:#94a3b8">Aucune ligne</td></tr>';
+  rEl('rstCount').textContent = P.length + ' ligne(s)';
+  rEl('rstTbody2').onclick = function(ev){ var tr = ev.target.closest ? ev.target.closest('tr.dr') : null; if (tr) rstOpen(tr.getAttribute('data-e'), tr.getAttribute('data-s')); };
+}
+
+/* ---------- Détail service (modale) ---------- */
+function rstOpen(e, s){
+  if (!RST.ix || !RST.ix[e] || !RST.ix[e][s]) return;
+  var a = rSvc(e, s, rMs()), t = RST.ix[e][s], med = rSvcMed(rMs())[s] || {};
+  rEl('rstMTitle').textContent = e + ' · ' + (RST_CITY[e] || '') + ' — ' + s;
+  function box(l, v){ return '<div class="rst-mm"><b>' + l + '</b><span>' + v + '</span></div>'; }
+  rEl('rstMGrid').innerHTML = box(a.pass ? 'Passages' : 'Nuitées', a.hs ? '—' : rInt(a.act)) + box('Repas patients', a.hs ? '—' : rInt(a.rep)) + box('Repas / ' + (a.pass ? 'passage' : 'nuitée'), rDec(a.ratio, 2)) +
+    box('Montant HT', rInt(a.mnt) + ' MAD') + box('Coût / unité', rDec(a.cout, 1) + (med.c ? ' <small style="font-size:.6em;color:#94a3b8">méd. ' + rDec(med.c, 1) + '</small>' : '')) + box('Prix moyen / prestation', rDec(a.prix, 1));
+  rEl('rstModal').style.display = 'flex';
+  rKill('modal');
+  if (typeof Chart === 'undefined') return;
+  function mv(arr, m){ return arr && typeof arr[m] === 'number' ? arr[m] : null; }
+  var cout = [0,1,2].map(function(m){ var x = rSvc(e, s, [m]); return x.cout; });
+  RST.ch.modal = new Chart(rEl('rstChModal'), {
+    data:{ labels:RST_MOIS, datasets:[
+      { type:'bar', label:(a.pass ? 'Passages' : 'Nuitées'), data:[0,1,2].map(function(m){ return mv(t.act, m); }), backgroundColor:'rgba(14,165,233,.85)', borderRadius:8, rl:{ pos:'end', fmt:rInt } },
+      { type:'bar', label:'Repas patients', data:[0,1,2].map(function(m){ return mv(t.rep, m); }), backgroundColor:'rgba(99,102,241,.85)', borderRadius:8, rl:{ pos:'end', fmt:rInt } },
+      { type:'line', label:'Coût HT / unité (MAD)', data:cout, borderColor:'#f59e0b', backgroundColor:'#f59e0b', borderWidth:3, tension:.3, pointRadius:5, yAxisID:'y1', spanGaps:false, rl:{ color:'#b45309', fmt:function(v){ return rDec(v, 1); } } } ] },
+    options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:18 } }, plugins:{ legend:rLegend(), datalabels:{ display:false } },
+      scales:{ y:{ beginAtZero:true, grid:R_GRID, ticks:R_AX }, y1:{ position:'right', beginAtZero:true, grid:{ display:false }, ticks:R_AX }, x:{ grid:{ display:false }, ticks:{ color:'#1e293b', font:{ size:12, weight:'800' } } } } },
+    plugins:[rLbl]
+  });
+}
+function rstCloseModal(){ rEl('rstModal').style.display = 'none'; rKill('modal'); }
+document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape') rstCloseModal(); });
+
+/* ---------- Export ---------- */
+function rstExport(){
+  if (!RST.ix) return;
+  var ms = rMs(), c = rCompute(ms), ref = rRef(ms), med = rSvcMed(ms), dims = rDims(ms);
+  var r1 = [[RST.ent ? 'Service' : 'Entité','Activité','Repas hors collations','Repas / unité','Prestations / unité','Prix moyen / prestation','Montant HT (MAD)','Coût HT / unité','Écart vs référence (%)','Surcoût vs référence (MAD)','Facturé HT','Écart facturation']];
+  dims.forEach(function(d){ var x = d.c, r = rDimRef(d, ref, med); r1.push([d.label, x.act, x.repM, x.ratio, x.prestU, x.prix, x.mnt, x.cout, (r && x.cout !== null) ? Math.round(rRel(x.cout, r) * 1000) / 10 : '', (r && x.cout !== null && x.act > 0) ? Math.round((x.cout - r) * x.act) : '', x.fac, x.ec]); });
+  var r2 = [['Entité','Service','Famille','Unité','Activité','Repas hors collations','Collations','Menus améliorés','Montant HT (MAD)','Coût HT / unité','Prix moyen','Jours renseignés','Jours écoulés']];
+  c.P.forEach(function(a){ r2.push([a.e, a.s, a.fam, a.pass ? 'Passages' : 'Nuitées', a.act, a.rep, a.col, a.men, a.mnt, a.cout, a.prix, a.js, a.exp]); });
+  var r3 = [['Entité','Service','Mois','Activité','Repas hors collations','Collations','Menus améliorés','Montant HT (MAD)']];
+  rEnts().forEach(function(e){ RST.order[e].forEach(function(s){ if (RST.fam && rFam(s) !== RST.fam) return; var t = RST.ix[e][s];
+    [0,1,2].forEach(function(m){ function g(arr){ return arr && typeof arr[m] === 'number' ? arr[m] : ''; } r3.push([e, s, RST_MOIS[m], g(t.act), g(t.rep), g(t.col), g(t.men), g(t.mnt)]); }); }); });
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(r1), 'Comparatif');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(r2), 'Services');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(r3), 'Mensuel');
+  XLSX.writeFile(wb, 'Suivi_Restauration_' + (ms.length === 3 ? 'T4' : RST_MOIS[ms[0]]) + '_2026.xlsx');
+}
+</script>
